@@ -9,8 +9,27 @@ public production deploy unless an owner explicitly authorizes those steps.
 | Env | DB | Auth | Notes |
 | --- | --- | --- | --- |
 | `local` (default) | SQLite | Dev login allowed; anonymous maps to local owner | Temp DBs for agents/tests |
-| `beta` | PostgreSQL required | Dev login must be off | Signed session cookies |
+| `beta` | PostgreSQL required | Dev login must be off; anonymous API calls get 401 | Signed session cookies |
 | `production` | PostgreSQL required | Same as beta | Not enabled in this teaching build |
+
+## Ownership and isolation
+
+Every request is bound to exactly one owner by the HTTP middleware in
+`app/main.py`:
+
+- A valid signed session for an existing user binds that user.
+- `LIFE_INBOX_ENV=local` with no valid session binds the Local Owner
+  (`local@life-inbox.local`). Signing out in local mode returns you to it.
+- Any other environment with no valid session returns 401 for every `/api/*`
+  route except `/api/health` and `/api/auth/*`. Nothing falls back to Local
+  Owner.
+
+`require_owner_id()` in `app/database.py` raises when no owner is bound.
+`inbox_items`, `tasks`, `topics` and `analysis_runs` carry `owner_user_id`.
+Derived rows are owned through their parents: `item_insights` via `item_id`,
+`item_relations` only when both items share an owner, `task_source_items` and
+`calendar_action_receipts` via their task. Foreign ids behave as not found
+(404). `tests/test_isolation.py` covers both directions for every feature.
 
 ## Required environment variables
 
@@ -76,7 +95,8 @@ stays SQLite-friendly for local teaching.
 - [ ] Dev login disabled outside local
 - [ ] Google OAuth still stubbed (`/api/auth/google/start` → 501)
 - [ ] Calendar writes still disabled
-- [ ] User A cannot read/delete User B items (covered by tests)
+- [ ] User A cannot read, change, or infer anything from User B's data (`tests/test_isolation.py`)
+- [ ] Anonymous `/api/items` returns 401 in beta
 - [ ] Health endpoint reports env + warnings
 - [ ] No secrets committed; uploads/DBs gitignored
 - [ ] Owner approval before public DNS / paid hosting / live OAuth

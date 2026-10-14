@@ -343,11 +343,55 @@ def get_or_create_default_owner_id() -> int:
     return user["id"]
 
 
+class OwnerRequiredError(PermissionError):
+    """No owner is bound to the current request; user data is off limits."""
+
+
 def require_owner_id() -> int:
+    """Return the bound owner. Never falls back to Local Owner.
+
+    Only the HTTP middleware decides when Local Owner applies (local mode with
+    no session). Everywhere else, a missing owner fails closed.
+    """
     owner = get_current_owner_id()
-    if owner is not None:
-        return owner
-    return get_or_create_default_owner_id()
+    if owner is None:
+        raise OwnerRequiredError("Authentication required.")
+    return owner
+
+
+def _owned_item(session, item_id: int, owner_id: int) -> Optional["InboxItemRecord"]:
+    item = session.get(InboxItemRecord, item_id)
+    if item is None or item.owner_user_id != owner_id:
+        return None
+    return item
+
+
+def _owned_task(session, task_id: int, owner_id: int) -> Optional["TaskRecord"]:
+    task = session.get(TaskRecord, task_id)
+    if task is None or task.owner_user_id != owner_id:
+        return None
+    return task
+
+
+def _owned_topic(session, topic_id: int, owner_id: int) -> Optional["TopicRecord"]:
+    topic = session.get(TopicRecord, topic_id)
+    if topic is None or topic.owner_user_id != owner_id:
+        return None
+    return topic
+
+
+def _owned_item_ids(owner_id: int):
+    return select(InboxItemRecord.id).where(
+        InboxItemRecord.owner_user_id == owner_id
+    )
+
+
+def _owned_topic_ids(session, owner_id: int) -> set[int]:
+    return set(
+        session.scalars(
+            select(TopicRecord.id).where(TopicRecord.owner_user_id == owner_id)
+        )
+    )
 
 
 def ensure_default_topics(session, owner_user_id: Optional[int] = None) -> None:
@@ -537,12 +581,8 @@ def compute_inbox_fingerprint(session=None) -> str:
 def update_item_in_db(item_id: int, raw_text: str) -> Optional[dict]:
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
-        if (
-            item is None
-            or item.item_type != TEXT_ITEM_TYPE
-            or item.owner_user_id != owner_id
-        ):
+        item = _owned_item(session, item_id, owner_id)
+        if item is None or item.item_type != TEXT_ITEM_TYPE:
             return None
 
         item.raw_text = raw_text
@@ -588,8 +628,8 @@ def _remove_orphan_tasks(session, item_ids: list[int]) -> None:
 def delete_item_from_db(item_id: int) -> bool:
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
-        if item is None or item.owner_user_id != owner_id:
+        item = _owned_item(session, item_id, owner_id)
+        if item is None:
             return False
 
         insight = session.get(ItemInsightRecord, item_id)
@@ -692,18 +732,23 @@ def _normalize_task_text(text: str) -> str:
 
 def complete_analysis_run(run_id: int, result: dict) -> dict:
     completed_at = datetime.now(timezone.utc).isoformat()
+    owner_id = require_owner_id()
     with SessionLocal() as session:
         run = session.get(AnalysisRunRecord, run_id)
-        if run is None or run.status != ANALYSIS_RUNNING:
+        if (
+            run is None
+            or run.status != ANALYSIS_RUNNING
+            or run.owner_user_id != owner_id
+        ):
             raise ValueError("Analysis run is not available for completion")
 
-        ensure_default_topics(session, owner_user_id=require_owner_id())
+        ensure_default_topics(session, owner_user_id=owner_id)
 
         for bucket in result["buckets"]:
             topic_id = _topic_id_by_name(session, bucket["name"])
             for analyzed_item in bucket["notes"]:
                 item_id = analyzed_item["id"]
-                if session.get(InboxItemRecord, item_id) is None:
+                if _owned_item(session, item_id, owner_id) is None:
                     raise ValueError(
                         f"Analysis references missing item {item_id}"
                     )
@@ -727,7 +772,7 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
                 )
                 insight.needs_review = 0
                 insight.updated_at = completed_at
-                item = session.get(InboxItemRecord, item_id)
+                item = _owned_item(session, item_id, owner_id)
                 if item is not None and insight.user_title is None:
                     item.title = analyzed_item["title"]
 
@@ -736,14 +781,17 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
             if not source_item_ids:
                 continue
             for item_id in source_item_ids:
-                if session.get(InboxItemRecord, item_id) is None:
+                if _owned_item(session, item_id, owner_id) is None:
                     raise ValueError(
                         f"Task references missing item {item_id}"
                     )
 
             dedup_key = _task_dedup_key(source_item_ids, todo["task"])
             task = session.scalars(
-                select(TaskRecord).where(TaskRecord.dedup_key == dedup_key)
+                select(TaskRecord).where(
+                    TaskRecord.dedup_key == dedup_key,
+                    TaskRecord.owner_user_id == owner_id,
+                )
             ).first()
 
             if task is None:
@@ -751,7 +799,10 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
                 candidates = session.scalars(
                     select(TaskRecord)
                     .join(TaskSourceItemRecord)
-                    .where(TaskSourceItemRecord.item_id.in_(source_item_ids))
+                    .where(
+                        TaskRecord.owner_user_id == owner_id,
+                        TaskSourceItemRecord.item_id.in_(source_item_ids),
+                    )
                     .distinct()
                     .order_by(TaskRecord.id.asc())
                 ).all()
@@ -790,7 +841,7 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
                     due_confidence=parsed_timing.confidence,
                     status=TASK_OPEN,
                     dedup_key=dedup_key,
-                    owner_user_id=require_owner_id(),
+                    owner_user_id=owner_id,
                     created_at=completed_at,
                     updated_at=completed_at,
                 )
@@ -832,39 +883,7 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
                             )
                         )
 
-        # Refresh deterministic relations for current inbox text.
-        items = [
-            _item_to_dict(item)
-            for item in session.scalars(select(InboxItemRecord)).all()
-        ]
-        for relation in session.scalars(select(ItemRelationRecord)).all():
-            if not relation.dismissed:
-                session.delete(relation)
-        session.flush()
-        for relation in find_item_relations(items):
-            existing = session.scalars(
-                select(ItemRelationRecord).where(
-                    ItemRelationRecord.item_id_a == relation["item_id_a"],
-                    ItemRelationRecord.item_id_b == relation["item_id_b"],
-                    ItemRelationRecord.relation_type
-                    == relation["relation_type"],
-                )
-            ).first()
-            if existing is not None:
-                if existing.dismissed:
-                    continue
-                existing.score = relation["score"]
-                continue
-            session.add(
-                ItemRelationRecord(
-                    item_id_a=relation["item_id_a"],
-                    item_id_b=relation["item_id_b"],
-                    relation_type=relation["relation_type"],
-                    score=relation["score"],
-                    created_at=completed_at,
-                    dismissed=0,
-                )
-            )
+        _refresh_owner_relations(session, owner_id, completed_at)
 
         fingerprint = compute_inbox_fingerprint(session)
         persisted = {
@@ -885,11 +904,75 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
         }
 
 
+def _refresh_owner_relations(session, owner_id: int, now: str) -> None:
+    """Recompute deterministic relations among one owner's items only.
+
+    A relation row must never connect items of different owners. Dismissed
+    rows are kept only when both endpoints belong to this owner; any
+    cross-owner row touching this owner's items is removed, dismissed or not.
+    """
+    owned_items = session.scalars(
+        select(InboxItemRecord).where(InboxItemRecord.owner_user_id == owner_id)
+    ).all()
+    owned_ids = {item.id for item in owned_items}
+    touching = session.scalars(
+        select(ItemRelationRecord).where(
+            or_(
+                ItemRelationRecord.item_id_a.in_(_owned_item_ids(owner_id)),
+                ItemRelationRecord.item_id_b.in_(_owned_item_ids(owner_id)),
+            )
+        )
+    ).all()
+    for relation in touching:
+        same_owner = (
+            relation.item_id_a in owned_ids and relation.item_id_b in owned_ids
+        )
+        if not same_owner or not relation.dismissed:
+            session.delete(relation)
+    session.flush()
+
+    items = [_item_to_dict(item) for item in owned_items]
+    for relation in find_item_relations(items):
+        if (
+            relation["item_id_a"] not in owned_ids
+            or relation["item_id_b"] not in owned_ids
+        ):
+            continue
+        existing = session.scalars(
+            select(ItemRelationRecord).where(
+                ItemRelationRecord.item_id_a == relation["item_id_a"],
+                ItemRelationRecord.item_id_b == relation["item_id_b"],
+                ItemRelationRecord.relation_type == relation["relation_type"],
+            )
+        ).first()
+        if existing is not None:
+            if existing.dismissed:
+                continue
+            existing.score = relation["score"]
+            continue
+        session.add(
+            ItemRelationRecord(
+                item_id_a=relation["item_id_a"],
+                item_id_b=relation["item_id_b"],
+                relation_type=relation["relation_type"],
+                score=relation["score"],
+                created_at=now,
+                dismissed=0,
+            )
+        )
+    session.flush()
+
+
 def fail_analysis_run(run_id: int) -> None:
     completed_at = datetime.now(timezone.utc).isoformat()
+    owner_id = require_owner_id()
     with SessionLocal() as session:
         run = session.get(AnalysisRunRecord, run_id)
-        if run is None or run.status != ANALYSIS_RUNNING:
+        if (
+            run is None
+            or run.status != ANALYSIS_RUNNING
+            or run.owner_user_id != owner_id
+        ):
             return
         run.completed_at = completed_at
         run.status = ANALYSIS_FAILED
@@ -998,8 +1081,8 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
 
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        task = session.get(TaskRecord, task_id)
-        if task is None or task.owner_user_id != owner_id:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
             return None
         if task.status != task_status:
             task.status = task_status
@@ -1038,8 +1121,9 @@ def complete_pdf_item_processing(
     extracted_text: str,
     mime_type: Optional[str],
 ) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.title = title
@@ -1084,8 +1168,9 @@ def complete_image_item_processing(
     ai_description: str,
     mime_type: Optional[str],
 ) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.title = title
@@ -1130,8 +1215,9 @@ def complete_voice_item_processing(
     extracted_text: str,
     mime_type: Optional[str],
 ) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.title = title
@@ -1151,8 +1237,9 @@ def update_item_extracted_text(
 ) -> Optional[dict]:
     """User edit of extracted/OCR/transcript text (facts), preserving AI description."""
     cleaned = extracted_text.strip()
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         if item.item_type not in {IMAGE_ITEM_TYPE, VOICE_ITEM_TYPE, PDF_ITEM_TYPE}:
@@ -1188,8 +1275,9 @@ def add_url_item_to_db(url: str) -> dict:
 
 
 def mark_item_processing(item_id: int) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.processing_status = STATUS_PROCESSING
@@ -1207,8 +1295,9 @@ def complete_url_item_processing(
     mime_type: Optional[str],
     final_url: Optional[str] = None,
 ) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.title = title
@@ -1225,8 +1314,9 @@ def complete_url_item_processing(
 
 
 def fail_item_processing(item_id: int, error_message: str) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
+        item = _owned_item(session, item_id, owner_id)
         if item is None:
             return None
         item.processing_status = STATUS_FAILED
@@ -1239,8 +1329,8 @@ def fail_item_processing(item_id: int, error_message: str) -> Optional[dict]:
 def get_item_from_db(item_id: int) -> Optional[dict]:
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        item = session.get(InboxItemRecord, item_id)
-        if item is None or item.owner_user_id != owner_id:
+        item = _owned_item(session, item_id, owner_id)
+        if item is None:
             return None
         return _item_to_dict(item)
 
@@ -1253,8 +1343,8 @@ def confirm_task_timing(
 
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        task = session.get(TaskRecord, task_id)
-        if task is None or task.owner_user_id != owner_id:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
             return None
         if timing_text is not None:
             task.timing_text = timing_text
@@ -1270,8 +1360,8 @@ def confirm_task_timing(
 def snooze_task_in_db(task_id: int, until_iso_date: str) -> Optional[dict]:
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        task = session.get(TaskRecord, task_id)
-        if task is None or task.owner_user_id != owner_id:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
             return None
         task.snoozed_until = until_iso_date
         task.reminder_at = until_iso_date
@@ -1283,8 +1373,8 @@ def snooze_task_in_db(task_id: int, until_iso_date: str) -> Optional[dict]:
 def set_task_reminder_in_db(task_id: int, reminder_iso_date: str) -> Optional[dict]:
     owner_id = require_owner_id()
     with SessionLocal() as session:
-        task = session.get(TaskRecord, task_id)
-        if task is None or task.owner_user_id != owner_id:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
             return None
         task.reminder_at = reminder_iso_date
         task.updated_at = datetime.now(timezone.utc).isoformat()
@@ -1400,7 +1490,10 @@ def save_calendar_receipt(
     payload: dict,
 ) -> dict:
     now = datetime.now(timezone.utc).isoformat()
+    owner_id = require_owner_id()
     with SessionLocal() as session:
+        if _owned_task(session, task_id, owner_id) is None:
+            raise ValueError("Task not found")
         receipt = CalendarActionReceiptRecord(
             draft_id=draft_id,
             task_id=task_id,
@@ -1447,13 +1540,12 @@ def list_topics_from_db(include_archived: bool = False) -> list[dict]:
         if not include_archived:
             statement = statement.where(TopicRecord.archived == 0)
         topics = session.scalars(statement).all()
+        owned_topic_ids = _owned_topic_ids(session, owner_id)
         counts = {}
-        for insight in session.scalars(select(ItemInsightRecord)).all():
-            effective_topic = (
-                insight.user_topic_id
-                if insight.user_topic_id is not None
-                else insight.topic_id
-            )
+        for insight in session.scalars(_owned_insights(owner_id)).all():
+            effective_topic = _insight_to_dict(insight, owned_topic_ids)[
+                "effective_topic_id"
+            ]
             if effective_topic is None:
                 continue
             counts[effective_topic] = counts.get(effective_topic, 0) + 1
@@ -1530,14 +1622,28 @@ def _parse_tags(raw: Optional[str]) -> list[str]:
     return [str(tag) for tag in value]
 
 
-def _insight_to_dict(insight: ItemInsightRecord) -> dict:
+def _owned_insights(owner_id: int):
+    return select(ItemInsightRecord).where(
+        ItemInsightRecord.item_id.in_(_owned_item_ids(owner_id))
+    )
+
+
+def _insight_to_dict(
+    insight: ItemInsightRecord,
+    owned_topic_ids: Optional[set[int]] = None,
+) -> dict:
+    """Serialize an insight; topic references outside the owner are dropped."""
+
+    def _own_topic(topic_id: Optional[int]) -> Optional[int]:
+        if topic_id is None or owned_topic_ids is None:
+            return topic_id
+        return topic_id if topic_id in owned_topic_ids else None
+
+    topic_id = _own_topic(insight.topic_id)
+    user_topic_id = _own_topic(insight.user_topic_id)
     effective_title = insight.user_title or insight.concise_title
     effective_priority = insight.user_priority or insight.priority
-    effective_topic_id = (
-        insight.user_topic_id
-        if insight.user_topic_id is not None
-        else insight.topic_id
-    )
+    effective_topic_id = user_topic_id if user_topic_id is not None else topic_id
     effective_tags = (
         _parse_tags(insight.user_tags_json)
         if insight.user_tags_json is not None
@@ -1549,11 +1655,11 @@ def _insight_to_dict(insight: ItemInsightRecord) -> dict:
         "category": insight.category,
         "concise_title": insight.concise_title,
         "priority": insight.priority,
-        "topic_id": insight.topic_id,
+        "topic_id": topic_id,
         "tags": _parse_tags(insight.tags_json),
         "rationale": insight.rationale,
         "user_title": insight.user_title,
-        "user_topic_id": insight.user_topic_id,
+        "user_topic_id": user_topic_id,
         "user_priority": insight.user_priority,
         "user_tags": (
             _parse_tags(insight.user_tags_json)
@@ -1569,7 +1675,7 @@ def _insight_to_dict(insight: ItemInsightRecord) -> dict:
         "has_user_overrides": any(
             [
                 insight.user_title is not None,
-                insight.user_topic_id is not None,
+                user_topic_id is not None,
                 insight.user_priority is not None,
                 insight.user_tags_json is not None,
             ]
@@ -1578,11 +1684,14 @@ def _insight_to_dict(insight: ItemInsightRecord) -> dict:
 
 
 def get_item_insight(item_id: int) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
+        if _owned_item(session, item_id, owner_id) is None:
+            return None
         insight = session.get(ItemInsightRecord, item_id)
         if insight is None:
             return None
-        return _insight_to_dict(insight)
+        return _insight_to_dict(insight, _owned_topic_ids(session, owner_id))
 
 
 def update_item_insight_overrides(
@@ -1594,7 +1703,11 @@ def update_item_insight_overrides(
     clear_overrides: bool = False,
     needs_review: Optional[bool] = None,
 ) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
+        item = _owned_item(session, item_id, owner_id)
+        if item is None:
+            return None
         insight = session.get(ItemInsightRecord, item_id)
         if insight is None:
             return None
@@ -1607,7 +1720,7 @@ def update_item_insight_overrides(
             if user_title is not None:
                 insight.user_title = user_title
             if user_topic_id is not None:
-                if session.get(TopicRecord, user_topic_id) is None:
+                if _owned_topic(session, user_topic_id, owner_id) is None:
                     raise ValueError("Topic not found")
                 insight.user_topic_id = user_topic_id
             if user_priority is not None:
@@ -1619,68 +1732,79 @@ def update_item_insight_overrides(
         if needs_review is not None:
             insight.needs_review = 1 if needs_review else 0
         insight.updated_at = datetime.now(timezone.utc).isoformat()
-        item = session.get(InboxItemRecord, item_id)
-        if item is not None and insight.user_title:
+        if insight.user_title:
             item.title = insight.user_title
         session.commit()
-        return _insight_to_dict(insight)
+        return _insight_to_dict(insight, _owned_topic_ids(session, owner_id))
+
+
+def _relation_to_dict(row: ItemRelationRecord) -> dict:
+    return {
+        "id": row.id,
+        "item_id_a": row.item_id_a,
+        "item_id_b": row.item_id_b,
+        "relation_type": row.relation_type,
+        "score": float(row.score),
+        "dismissed": bool(row.dismissed),
+        "created_at": row.created_at,
+    }
+
+
+def _owned_relations(owner_id: int):
+    """Relations whose two endpoints both belong to this owner."""
+    owned_ids = _owned_item_ids(owner_id)
+    return select(ItemRelationRecord).where(
+        ItemRelationRecord.item_id_a.in_(owned_ids),
+        ItemRelationRecord.item_id_b.in_(owned_ids),
+    )
 
 
 def list_relations_from_db(
     include_dismissed: bool = False,
 ) -> list[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        statement = select(ItemRelationRecord).order_by(
+        statement = _owned_relations(owner_id).order_by(
             ItemRelationRecord.id.asc()
         )
         if not include_dismissed:
             statement = statement.where(ItemRelationRecord.dismissed == 0)
         rows = session.scalars(statement).all()
-        return [
-            {
-                "id": row.id,
-                "item_id_a": row.item_id_a,
-                "item_id_b": row.item_id_b,
-                "relation_type": row.relation_type,
-                "score": float(row.score),
-                "dismissed": bool(row.dismissed),
-                "created_at": row.created_at,
-            }
-            for row in rows
-        ]
+        return [_relation_to_dict(row) for row in rows]
 
 
 def dismiss_relation_in_db(relation_id: int) -> Optional[dict]:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        row = session.get(ItemRelationRecord, relation_id)
+        row = session.scalars(
+            _owned_relations(owner_id).where(
+                ItemRelationRecord.id == relation_id
+            )
+        ).first()
         if row is None:
             return None
         row.dismissed = 1
         session.commit()
-        return {
-            "id": row.id,
-            "item_id_a": row.item_id_a,
-            "item_id_b": row.item_id_b,
-            "relation_type": row.relation_type,
-            "score": float(row.score),
-            "dismissed": True,
-            "created_at": row.created_at,
-        }
+        return _relation_to_dict(row)
 
 
 def get_organization_dashboard() -> dict:
+    owner_id = require_owner_id()
     with SessionLocal() as session:
-        ensure_default_topics(session, owner_user_id=require_owner_id())
+        ensure_default_topics(session, owner_user_id=owner_id)
         session.commit()
         topics = list_topics_from_db()
+        owned_topic_ids = _owned_topic_ids(session, owner_id)
         insights = {
-            insight.item_id: _insight_to_dict(insight)
-            for insight in session.scalars(select(ItemInsightRecord)).all()
+            insight.item_id: _insight_to_dict(insight, owned_topic_ids)
+            for insight in session.scalars(_owned_insights(owner_id)).all()
         }
         items = [
             _item_to_dict(item)
             for item in session.scalars(
-                select(InboxItemRecord).order_by(InboxItemRecord.id.desc())
+                select(InboxItemRecord)
+                .where(InboxItemRecord.owner_user_id == owner_id)
+                .order_by(InboxItemRecord.id.desc())
             ).all()
         ]
         high_priority = []

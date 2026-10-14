@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.capture.image_extract import process_image_bytes, validate_image_upload
@@ -45,6 +45,8 @@ from app.database import (
     get_latest_successful_analysis,
     get_organization_dashboard,
     init_db,
+    OwnerRequiredError,
+    require_owner_id,
     list_items_from_db,
     list_notes_from_db,
     list_relations_from_db,
@@ -109,22 +111,57 @@ app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 init_db()
 
+_OPEN_API_PATHS = ("/api/health", "/api/auth/")
+
+
+def _is_protected_api_path(path: str) -> bool:
+    if not path.startswith("/api/"):
+        return False
+    return not any(
+        path == open_path or path.startswith(open_path)
+        for open_path in _OPEN_API_PATHS
+    )
+
+
+def _session_owner_id(request) -> Optional[int]:
+    """Owner id from a valid signed session whose user still exists."""
+    from app.auth import SESSION_COOKIE, parse_session_token
+    from app.database import get_user_by_id
+
+    token = request.cookies.get(SESSION_COOKIE)
+    user_id = parse_session_token(token) if token else None
+    if user_id is None or get_user_by_id(user_id) is None:
+        return None
+    return user_id
+
+
+def _is_local_environment() -> bool:
+    from app.config import load_config
+
+    return load_config(strict=False).environment == "local"
+
+
+@app.exception_handler(OwnerRequiredError)
+async def owner_required_handler(request, exc):
+    return JSONResponse(status_code=401, content={"detail": "Authentication required."})
+
 
 @app.middleware("http")
 async def bind_owner_from_session(request, call_next):
-    from app.auth import SESSION_COOKIE, parse_session_token
-    from app.config import load_config
     from app.database import (
         get_or_create_default_owner_id,
         set_current_owner_id,
     )
 
-    token = request.cookies.get(SESSION_COOKIE)
-    owner_id = parse_session_token(token) if token else None
-    if owner_id is None:
-        config = load_config(strict=False)
-        if config.environment == "local":
-            owner_id = get_or_create_default_owner_id()
+    owner_id = _session_owner_id(request)
+    if owner_id is None and _is_local_environment():
+        # Single-user local mode: anonymous requests act as Local Owner.
+        owner_id = get_or_create_default_owner_id()
+    if owner_id is None and _is_protected_api_path(request.url.path):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required."},
+        )
     set_current_owner_id(owner_id)
     try:
         response = await call_next(request)
@@ -153,16 +190,13 @@ def health():
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
-    from app.auth import SESSION_COOKIE, parse_session_token
     from app.database import get_or_create_default_owner_id, get_user_by_id
 
-    token = request.cookies.get(SESSION_COOKIE)
-    user_id = parse_session_token(token) if token else None
+    user_id = _session_owner_id(request)
     if user_id is not None:
-        user = get_user_by_id(user_id)
-        if user is not None:
-            return user
-    # Local anonymous maps to default owner identity for display only.
+        return get_user_by_id(user_id)
+    if not _is_local_environment():
+        raise HTTPException(status_code=401, detail="Authentication required.")
     return get_user_by_id(get_or_create_default_owner_id())
 
 
@@ -937,7 +971,7 @@ def calendar_preview(payload: CalendarPreviewRequest):
         description=payload.description or "",
         timezone_name=str(configured_timezone()),
     )
-    store_draft(draft)
+    store_draft(draft, require_owner_id())
     return {
         "draft_id": draft.draft_id,
         "task_id": draft.task_id,
@@ -955,7 +989,8 @@ def calendar_preview(payload: CalendarPreviewRequest):
 
 @app.post("/api/calendar/confirm")
 def calendar_confirm(payload: CalendarConfirmRequest):
-    draft = get_draft(payload.draft_id)
+    owner_id = require_owner_id()
+    draft = get_draft(payload.draft_id, owner_id)
     if draft is None:
         raise HTTPException(
             status_code=404,
@@ -973,20 +1008,23 @@ def calendar_confirm(payload: CalendarConfirmRequest):
             detail="Unable to confirm calendar action.",
         ) from exc
 
-    store_draft(confirmed)
-    receipt = save_calendar_receipt(
-        draft_id=confirmed.draft_id,
-        task_id=confirmed.task_id,
-        provider=confirmed.provider,
-        status=confirmed.status,
-        payload={
-            "title": confirmed.title,
-            "start_date": confirmed.start_date,
-            "end_date": confirmed.end_date,
-            "timezone": confirmed.timezone_name,
-            "notes": confirmed.notes,
-        },
-    )
+    try:
+        receipt = save_calendar_receipt(
+            draft_id=confirmed.draft_id,
+            task_id=confirmed.task_id,
+            provider=confirmed.provider,
+            status=confirmed.status,
+            payload={
+                "title": confirmed.title,
+                "start_date": confirmed.start_date,
+                "end_date": confirmed.end_date,
+                "timezone": confirmed.timezone_name,
+                "notes": confirmed.notes,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Task not found.") from exc
+    store_draft(confirmed, owner_id)
     return {
         "draft_id": confirmed.draft_id,
         "task_id": confirmed.task_id,
