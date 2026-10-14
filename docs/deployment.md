@@ -8,7 +8,7 @@ public production deploy unless an owner explicitly authorizes those steps.
 
 | Env | DB | Auth | Notes |
 | --- | --- | --- | --- |
-| `local` (default) | SQLite | Dev login allowed; anonymous maps to local owner | Temp DBs for agents/tests |
+| `local` (default) | SQLite | Dev login is passwordless and on unless set to false; anonymous maps to local owner | Temp DBs for agents/tests. The student quick start turns Dev Login off until a team wants separate inboxes. |
 | `beta` | PostgreSQL required | Dev login must be off; anonymous API calls get 401 | Signed session cookies |
 | `production` | PostgreSQL required | Same as beta | Not enabled in this teaching build |
 

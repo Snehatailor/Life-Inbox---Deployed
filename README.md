@@ -1,199 +1,318 @@
 # Life Inbox
 
-This is the local-project version of the Life Inbox Google Colab notebook.
-It preserves the features already present in the notebook:
+Life Inbox is a small web app for capturing things you want to remember and organizing them later. You can save text, links, PDFs, images, and voice notes. You can sort them into topics and tasks, search them, and ask questions that cite your own items.
 
-- save a text note;
-- list, edit, and delete saved notes;
-- organize the entire inbox into buckets, priorities, and ToDos;
-- use the OpenAI API when an API key is available;
-- use the notebook's deterministic fallback organizer otherwise.
+This repository is a working starting point, not a finished product. Your team may change the product, the interface, or the structure when you have a reason.
 
-## 1. Requirements
+**If you use Cursor or another coding agent, first tell it to read `AGENTS.md`.** The copy-paste prompts are in the next section. The run steps are immediately after that.
 
-- Python 3.10 or newer
-- A terminal
-- An OpenAI API key is optional. The fallback organizer works without one.
+You do not need to understand the entire codebase before your first change. Ask the coding agent to explain only the part involved in what you are trying to build.
 
-## 2. Set up the project
+## If you use a coding agent
 
-Fork [AI-WORKSHOP-SEP26/life-inbox](https://github.com/AI-WORKSHOP-SEP26/life-inbox)
-into your own GitHub account, then clone **your fork**. Check out the classroom
-reference: branch `main`, or tag `life-inbox-v1`. `class-starter` is the earlier
-pre-buildout baseline, not the branch to build on.
+Paste this first:
+
+```text
+Read AGENTS.md first.
+
+Then inspect this repository and explain Life Inbox to me in simple language.
+
+Tell me:
+1. what the product currently does,
+2. how the frontend, backend and database fit together,
+3. where AI is currently used,
+4. how to run the app,
+5. how to run the tests.
+
+Do not change any code yet.
+```
+
+When you have an idea, paste this before any edits:
+
+```text
+I want to improve Life Inbox in the following way:
+
+<describe the idea in plain English>
+
+First inspect the existing implementation.
+
+Before changing code:
+1. explain what already exists,
+2. propose the smallest sensible implementation,
+3. tell me which parts of the system will change,
+4. explain important product or engineering trade-offs,
+5. explain how we will verify it works.
+
+Do not modify files yet. Wait for my approval.
+```
+
+After you approve the plan:
+
+```text
+Proceed with the approved plan.
+
+Work in small, verifiable steps.
+Preserve existing working behavior.
+Add or update tests for important behavior.
+Run relevant tests.
+
+When finished, tell me:
+1. what changed,
+2. what you tested,
+3. what still does not work,
+4. what I should manually verify.
+```
+
+A coding agent can help you with no OpenAI key. See “Two kinds of AI” below.
+
+## Team setup
+
+Teams are 5–6 students. One team uses one fork.
+
+1. One teammate creates the fork.
+2. That person adds every teammate as a collaborator.
+3. Also add Tarun (GitHub: `tmiiitd`) as a collaborator.
+4. Everyone else accepts the invite and clones that same fork.
+
+Do not each make your own fork.
+
+**Team Registration Form:** <https://docs.google.com/forms/d/e/1FAIpQLSdUe0jSuUQSnbed5FXjFH_cuydNIl9CxYICpYa9Rqd-bgXUGg/viewform>
+
+If you are not in a registered team, the instructor will assign you to one.
+
+The 10-day sprint is described in `BUILD_SPRINT.md`.
+
+## New here? Start with these steps
+
+The path is: fork → clone → run → understand → improve → test → demo. You always start from the latest `main`.
+
+### 1. Fork as a team
+
+One teammate opens <https://github.com/AI-WORKSHOP-SEP26/life-inbox> and clicks **Fork**. That person’s GitHub account holds the team repository.
+
+On the fork, open **Settings → Collaborators → Add people**. Invite every teammate, and invite Tarun (`tmiiitd`). Everyone accepts the invite.
+
+### 2. Clone the team’s fork
+
+macOS and Linux:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/life-inbox.git
+git clone https://github.com/TEAM_FORK_OWNER/life-inbox.git
 cd life-inbox
-git checkout main
-git checkout -b my-change
 ```
 
-Tag `life-inbox-v1` marks that same classroom reference. To start from the tag,
-run `git checkout life-inbox-v1` before `git checkout -b my-change`.
-
-Open a terminal in this folder and create a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-On Windows, activate it with:
+Windows PowerShell:
 
 ```powershell
-.venv\Scripts\activate
+git clone https://github.com/TEAM_FORK_OWNER/life-inbox.git
+cd life-inbox
 ```
 
-Install the dependencies:
+Replace `TEAM_FORK_OWNER` with the GitHub username that created the fork. After clone you are on the latest `main`. That is the starting point.
+
+### 3. Open a terminal in the repo
+
+The prompt should be inside the `life-inbox` folder before every later command. Check:
+
+macOS and Linux:
+
+```bash
+ls README.md
+```
+
+Windows PowerShell:
+
+```powershell
+dir README.md
+```
+
+You should see `README.md`. If the command cannot find it, `cd` into the folder you cloned.
+
+### 4. Verify Python 3.12
+
+This class uses Python 3.12. Stop if you do not see a version that starts with `3.12`. Install 3.12, then open a new terminal. Details are in `docs/TROUBLESHOOTING.md`.
+
+macOS and Linux:
+
+```bash
+python3.12 --version
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.12 --version
+```
+
+Expected: `Python 3.12.x`. A “command not found” message, or any other version, means stop.
+
+### 5. Create and activate a virtual environment
+
+A virtual environment (`.venv`) is a Python just for this project.
+
+macOS and Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python --version
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python --version
+```
+
+Expected: `Python 3.12.x` again. Your prompt often shows `(.venv)`. If `python --version` is not 3.12, the environment was created with the wrong interpreter. Stop and use `docs/TROUBLESHOOTING.md`.
+
+### 6. Install dependencies
+
+With `.venv` still active:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-## 3. Configure and migrate the database
+Expected: the command ends without an error. The last lines usually say a package was successfully installed.
 
-Use a SQLite file you own. The default path is `data/life_inbox.db`
-(`data/*.db` and `data/uploads/` are gitignored). An absolute path keeps
-Alembic and the app on the same file. On Windows, a URL looks like
-`sqlite:///C:/Users/you/life_inbox.db`.
+### 7. Local settings for the first run
 
-The app reads environment variables. It does not load a `.env` file by itself.
-Copy the names from `.env.example` and export them before Alembic or uvicorn:
+You do not need a database URL, an upload folder, or an API key to start.
+
+From this folder, with those variables left unset:
+
+- the database file is `data/life_inbox.db`
+- uploads go in `data/uploads/`
+
+Both paths are ignored by Git. Run Alembic and Uvicorn from this folder so they use those files.
+
+**Dev Login stays off for the first run.** It is a passwordless sign-in box, not a real account system. With it off, the header shows `Local Owner <local@life-inbox.local>` and every note you save stays in that one local inbox. In the same terminal you will use to start the server:
+
+macOS and Linux:
 
 ```bash
-export DATABASE_URL="sqlite:////absolute/path/to/life_inbox.db"
-export LIFE_INBOX_UPLOAD_DIR="/absolute/path/to/uploads"
-export LIFE_INBOX_SESSION_SECRET="replace-with-a-long-local-secret"
-export LIFE_INBOX_ENV=local
-export LIFE_INBOX_ALLOW_DEV_LOGIN=1
+export LIFE_INBOX_ALLOW_DEV_LOGIN=false
 ```
 
-On Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
-$env:DATABASE_URL="sqlite:///C:/Users/you/life_inbox.db"
-$env:LIFE_INBOX_UPLOAD_DIR="C:/Users/you/life-inbox-uploads"
-$env:LIFE_INBOX_SESSION_SECRET="replace-with-a-long-local-secret"
-$env:LIFE_INBOX_ENV="local"
-$env:LIFE_INBOX_ALLOW_DEV_LOGIN="1"
+$env:LIFE_INBOX_ALLOW_DEV_LOGIN="false"
 ```
 
-`LIFE_INBOX_ENV=local` keeps SQLite valid. `LIFE_INBOX_ALLOW_DEV_LOGIN=1`
-turns on passwordless dev login. `LIFE_INBOX_SESSION_SECRET` signs the session
-cookie; if you leave it empty locally, the app uses a built-in default. Set
-your own value and do not commit it.
+The page can still show the Dev login box. Clicking **Sign in** should then say that sign-in failed because dev login may be disabled. You can save notes without that box.
 
-Never commit `.env`, API keys, database files, or uploads.
+The app does not read a `.env` file. Editing `.env.example` does nothing until you export the variable in the terminal. If the variable is unset, the code turns Dev Login **on**. That is why the first-run commands set it to `false`.
 
-For a new or empty local database, apply all migrations with:
+**Turn Dev Login on only if your team wants separate inboxes on one computer.** Stop the server, then in that same terminal:
+
+macOS and Linux:
+
+```bash
+export LIFE_INBOX_ALLOW_DEV_LOGIN=true
+```
+
+Windows PowerShell:
+
+```powershell
+$env:LIFE_INBOX_ALLOW_DEV_LOGIN="true"
+```
+
+Start the server again. Type an email and click **Sign in**. A second person uses a different browser profile (or an incognito window), signs in with a different email, and sees none of the first person’s notes, tasks, search results, or dashboard. There is no password. Do not treat this as production login.
+
+**Secrets.** Never commit an API key. Never put one in source code. Never paste one into a coding-agent conversation. Put secrets in environment variables only, in the terminal that starts the app.
+
+On your own laptop, with the app open only at `127.0.0.1`, you may leave `LIFE_INBOX_SESSION_SECRET` unset. The app uses a built-in local value. If another person can open the app, or you deploy it, set a long private `LIFE_INBOX_SESSION_SECRET` in the environment and do not commit it.
+
+### 8. Create the database tables
+
+Alembic is the tool that creates the tables. The app does not create them when it starts.
 
 ```bash
 python -m alembic upgrade head
-```
-
-For an existing `data/life_inbox.db`, make a backup and then run the same
-upgrade:
-
-```bash
-cp data/life_inbox.db data/life_inbox.db.backup
-python -m alembic upgrade head
-```
-
-The initial migration detects the existing `notes` table, validates its
-required columns, and adopts it without deleting or copying any notes. Check
-the applied revision with:
-
-```bash
 python -m alembic current
 ```
 
-The application does not run Alembic migrations automatically at startup.
-Always `alembic upgrade head` against the target database before running the
-app.
+Expected: `upgrade head` finishes without an error. The output of `current` includes `(head)`.
 
-### Canonical inbox-item model
+### 9. Start Uvicorn
 
-The canonical API is `/api/items`. The browser uses this API for text-item
-creation, listing, editing, and deletion. Items include:
+Uvicorn is the program that serves the app.
 
-- `id`, `item_type`, and `processing_status`;
-- optional `title`, `source_url`, `original_filename`, and `mime_type`;
-- `raw_text`, `created_at`, and optional `updated_at`.
+```bash
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-Supported captures: `text` notes, `url` article links (`POST /api/items/url`),
-`pdf` uploads (`POST /api/items/pdf`, multipart field `file`), images
-(`POST /api/items/image`), and voice (`POST /api/items/voice`). PDF, image, and
-voice originals are stored under `data/uploads/` (or `LIFE_INBOX_UPLOAD_DIR`);
-preview via `GET /api/items/{id}/file`.
+Expected: a line like `Uvicorn running on http://127.0.0.1:8000`. Leave this terminal open. Stop the server later with Control+C.
 
-`GET /api/items` accepts optional `q`, `item_type`, `category`, `priority`,
-`processing_status`, `limit` (1–500, default 100), and `offset` query
-parameters. Text search is case-insensitive and matches raw text, title,
-extracted text, or original filename.
-Category and priority filters use the latest saved analysis insights. The
-browser loads notes in pages of 100 with a “Load more” control.
+The `export` or `$env:` from step 7 must be in this same terminal. A new terminal does not keep it.
 
-The `/api/notes` routes remain temporarily available as deprecated
-compatibility adapters. They read and write the same `inbox_items` records
-while preserving the former note response shape. Migration `0003` copies
-legacy notes into `inbox_items` with the same IDs and timestamps. The legacy
-`notes` table is retained unchanged as a migration safety copy and is no
-longer authoritative.
+### 10. Open the app
 
-### Persisted analysis
+In a browser, open <http://127.0.0.1:8000>.
 
-`POST /api/analyze` still organizes the complete inbox. Successful validated
-results are stored in `analysis_runs`, and each text item's latest category,
-concise title, and priority are stored in `item_insights`.
+Expected: a page titled Life Inbox, with a large text box and an **Add Note** button.
 
-`GET /api/analyze/latest` returns the latest successful result without calling
-OpenAI. The browser uses it on page load and displays when the result was
-generated. Each successful result stores an inbox content fingerprint; the API
-sets `is_stale` when items have changed since that run. Failed runs are
-recorded separately and never replace the previous successful result or its
-item insights.
+### 11. Create a test note and refresh
 
-Schema evolution is owned by Alembic. The application does not create tables at
-startup unless `LIFE_INBOX_AUTO_CREATE_TABLES=1` (automated tests only).
+Type a sentence in the large text box. Click **Add Note**. The sentence appears under **Raw saved notes**. Refresh the browser. The sentence is still there.
 
-### Persistent tasks
+### 12. Run the tests
 
-Successful analysis runs convert extracted ToDos into persistent tasks.
-Generated tasks start as `open` and retain links to every source inbox item.
-The default task view shows only open tasks; completed and dismissed tasks can
-be viewed separately and reopened.
+Open a second terminal. `cd` into the repo, activate `.venv` the same way as step 5, then:
 
-Task APIs:
+```bash
+python -m pytest
+```
 
-- `GET /api/tasks?status=open` lists tasks (`completed`, `dismissed`, and
-  `all` are also supported);
-- `POST /api/tasks/{id}/complete` completes a task;
-- `POST /api/tasks/{id}/reopen` reopens a task;
-- `POST /api/tasks/{id}/dismiss` dismisses a task.
+Expected: a summary line that says `passed` and does not say `failed`. The tests use temporary databases and do not call OpenAI. You can leave the server running in the first terminal.
 
-Each inbox item can source at most one generated task. Reanalysis updates that
-task's latest text, priority, and timing in place instead of creating a
-duplicate when AI wording or priority changes. Its open, completed, or
-dismissed status is never changed by AI analysis.
+## Setup worked if...
 
-## 4. Optional: configure OpenAI
+- Life Inbox loads in the browser
+- I can create a text item
+- Refresh does not lose it
+- `python -m alembic current` shows `(head)`
+- `python -m pytest` passes
 
-These work with no API key:
+If one of these fails, use `docs/TROUBLESHOOTING.md`.
 
-- deterministic organizer (keyword fallback);
-- extractive Ask (citations from your inbox, no LLM);
-- voice upload with a transcript you edit by hand.
+## Two kinds of AI
 
-These need `OPENAI_API_KEY`:
+These are independent.
 
-- live organize (`OPENAI_MODEL`, default `gpt-5-mini`);
-- grounded LLM Ask (same model);
-- Whisper transcription (`OPENAI_TRANSCRIPTION_MODEL`, default `whisper-1`).
+**A coding assistant** (Cursor, Claude Code, Gemini, Copilot, ChatGPT, or another tool) edits this project with you. It does not need `OPENAI_API_KEY`. Tell it to read `AGENTS.md` first.
 
-Image OCR needs the Tesseract program installed separately, plus `pytesseract`
-(not listed in `requirements.txt`). Image vision is not live; descriptions stay
-on the local fallback even when a key is set.
+**AI inside Life Inbox** is optional. If you export `OPENAI_API_KEY`, some features call OpenAI. Never commit that key, never put it in source code, and never paste it into a coding-agent conversation. Set it only as an environment variable.
+
+Without a key, these still work:
+
+- save, edit, and delete text notes
+- save a public `http` or `https` link (the app fetches the page; localhost links are rejected)
+- upload a text-based PDF and read extracted text
+- upload an image and see a thumbnail; image descriptions stay on a local summary
+- upload or record a voice note, play it, and type a transcript yourself
+- **Analyze Entire Inbox with AI** uses a built-in organizer: rules in the code, not a model
+- topics, saved tasks, search, and filters
+- **Ask My Inbox** quotes matching passages from your inbox and cites them
+- the Attention board, in-app reminders, and a calendar preview you confirm on this computer
+
+A key adds three calls:
+
+- live organization (`OPENAI_MODEL`, default `gpt-5-mini`)
+- Ask answers written by a model from those same passages, still with citations (`OPENAI_MODEL`)
+- automatic voice transcript through Whisper (`OPENAI_TRANSCRIPTION_MODEL`, default `whisper-1`)
+
+If a live call fails, organization and Ask fall back to the no-key behavior.
+
+Image text recognition is separate from the API key. It needs the Tesseract program and the `pytesseract` package, which are not in `requirements.txt`. Without them, the image still uploads and the description stays local. Image “vision” does not call a model, even when a key is set.
+
+Optional, in the same terminal as Uvicorn:
+
+macOS and Linux:
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
@@ -201,7 +320,7 @@ export OPENAI_MODEL="gpt-5-mini"
 export OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 ```
 
-On Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
 $env:OPENAI_API_KEY="your-api-key"
@@ -209,89 +328,40 @@ $env:OPENAI_MODEL="gpt-5-mini"
 $env:OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 ```
 
-Do not put a real key in source code or commit it.
+## What you are starting from
 
-## 5. Start Life Inbox
+You can capture text, URLs, PDFs, images, and voice. **Analyze Entire Inbox with AI** groups items and creates tasks that stay in the database. You can add topics yourself. Search and filters narrow the saved list. Ask My Inbox answers from your items and shows sources. Attention groups open tasks by time. Reminders stay in the app. Calendar preview asks you to confirm; the default confirmation is a mock receipt on this computer, not a Google Calendar write.
 
-From the top-level `life-inbox` folder, run:
+Some of this is rough. The screen is crowded. Analysis looks at the whole inbox. Dates, categories, and duplicates can be wrong. That is the point of the sprint: pick a direction and make a coherent product. Read `BUILD_SPRINT.md`.
 
-```bash
-python -m uvicorn app.main:app --reload
-```
+Deeper behavior, routes, and tables are in `docs/architecture.md`. A longer browser checklist is in `docs/manual-testing.md`. Hosting is in `docs/deployment.md` and is not part of the first run.
 
-Then open:
+While the server is stopped, `python -m scripts.seed_demo_notes` can insert sample notes. With no API key it uses a built-in list.
 
-<http://127.0.0.1:8000>
-
-Stop the server by pressing `Control+C` in the terminal.
-
-## 6. Run the automated tests
-
-From the top-level `life-inbox` folder, run:
-
-```bash
-python -m pytest
-```
-
-The tests use temporary SQLite databases and do not call OpenAI.
-
-Before changing code with Cursor or a similar assistant, point it at
-`AGENTS.md`. Schema changes go through Alembic only. Tests must keep using
-temporary databases and must not call live paid APIs.
-
-## 7. Optional: add demonstration notes
-
-The original notebook included a utility that adds realistic sample notes.
-While the server is stopped, run:
-
-```bash
-python -m scripts.seed_demo_notes
-```
-
-It uses OpenAI when an API key is available and otherwise uses the notebook's
-local fallback list.
-
-## Project layout
+## Repository layout
 
 ```text
 life-inbox/
 ├── app/
-│   ├── main.py
-│   ├── database.py
-│   ├── schemas.py
-│   ├── organizer.py
+│   ├── main.py            # HTTP routes
+│   ├── database.py        # saved items, tasks, topics
+│   ├── schemas.py         # request and response shapes
+│   ├── organizer.py       # live or built-in organization
+│   ├── auth.py            # session cookie and dev login
+│   ├── config.py          # environment defaults
+│   ├── attention/         # dates, attention, briefing
+│   ├── capture/           # URL, PDF, image, voice
+│   ├── integrations/      # calendar preview and mock confirm
+│   ├── retrieval/         # search and Ask
 │   ├── templates/index.html
-│   └── static/
-│       ├── app.js
-│       └── styles.css
-├── migrations/
-│   ├── env.py
-│   └── versions/
-│       ├── 0001_create_notes_table.py
-│       ├── 0002_add_updated_at_to_notes.py
-│       ├── 0003_create_inbox_items.py
-│       ├── 0004_persist_analysis_results.py
-│       ├── 0005_create_tasks.py
-│       └── 0006_deduplicate_tasks_by_source.py
-├── alembic.ini
-├── data/
-├── docs/
-│   ├── architecture.md
-│   ├── manual-testing.md
-│   ├── milestone-status.md
-│   └── product-roadmap.md
-├── scripts/seed_demo_notes.py
+│   └── static/            # browser JavaScript and CSS
+├── migrations/versions/   # database revisions applied by Alembic
 ├── tests/
-│   ├── test_api.py
-│   └── test_migrations.py
-├── reference/original_life_inbox_notebook.ipynb
-├── .github/workflows/ci.yml
-├── AGENTS.md
-├── .env.example
-├── .gitignore
+├── docs/
+├── AGENTS.md              # rules for coding agents
+├── BUILD_SPRINT.md        # 10-day team sprint
+├── README.md
 ├── requirements.txt
-└── README.md
+├── alembic.ini
+└── .env.example
 ```
-
-The original notebook remains in `reference/` so you can compare the local
-project with the classroom version.
