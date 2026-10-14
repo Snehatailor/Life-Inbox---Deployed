@@ -20,7 +20,6 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
-    func,
     or_,
     select,
 )
@@ -352,15 +351,24 @@ def require_owner_id() -> int:
 
 
 def ensure_default_topics(session, owner_user_id: Optional[int] = None) -> None:
-    owner = owner_user_id
-    statement = select(func.count()).select_from(TopicRecord)
-    if owner is not None:
-        statement = statement.where(TopicRecord.owner_user_id == owner)
-    count = session.scalar(statement) or 0
-    if count:
+    """Seed missing default topics for one owner.
+
+    A name already exists only when this owner has it. Another user's Work
+    is not reused and does not block this owner's copy.
+    """
+    owner = owner_user_id if owner_user_id is not None else require_owner_id()
+    existing_names = set(
+        session.scalars(
+            select(TopicRecord.name).where(TopicRecord.owner_user_id == owner)
+        )
+    )
+    missing = [
+        name for name in DEFAULT_TOPIC_NAMES if name not in existing_names
+    ]
+    if not missing:
         return
     now = datetime.now(timezone.utc).isoformat()
-    for name in DEFAULT_TOPIC_NAMES:
+    for name in missing:
         session.add(
             TopicRecord(
                 name=name,
@@ -689,7 +697,7 @@ def complete_analysis_run(run_id: int, result: dict) -> dict:
         if run is None or run.status != ANALYSIS_RUNNING:
             raise ValueError("Analysis run is not available for completion")
 
-        ensure_default_topics(session)
+        ensure_default_topics(session, owner_user_id=require_owner_id())
 
         for bucket in result["buckets"]:
             topic_id = _topic_id_by_name(session, bucket["name"])
@@ -1662,7 +1670,7 @@ def dismiss_relation_in_db(relation_id: int) -> Optional[dict]:
 
 def get_organization_dashboard() -> dict:
     with SessionLocal() as session:
-        ensure_default_topics(session)
+        ensure_default_topics(session, owner_user_id=require_owner_id())
         session.commit()
         topics = list_topics_from_db()
         insights = {

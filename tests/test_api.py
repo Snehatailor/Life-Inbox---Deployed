@@ -2045,3 +2045,150 @@ def test_health_includes_config_metadata(client):
     assert payload["status"] == "ok"
     assert "environment" in payload
     assert "database" in payload
+
+
+def test_second_owner_seeds_own_default_topics_on_migrated_database(
+    tmp_path, monkeypatch
+):
+    """Alembic-built SQLite used to keep UNIQUE(topics.name).
+
+    Owner A already has Work from the original seed. Owner B must list
+    topics, load the dashboard, and analyze without a 500, and must receive
+    a distinct Work row.
+    """
+    from alembic import command
+    from tests.test_migrations import alembic_config
+
+    database_path = tmp_path / "migrated_topics.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.delenv("LIFE_INBOX_AUTO_CREATE_TABLES", raising=False)
+    monkeypatch.setenv("LIFE_INBOX_UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LIFE_INBOX_ENV", "local")
+
+    command.upgrade(alembic_config(database_path), "head")
+
+    module_names = (
+        "app.main",
+        "app.database",
+        "app.auth",
+        "app.config",
+        "app.integrations.calendar",
+    )
+    for module_name in module_names:
+        sys.modules.pop(module_name, None)
+
+    try:
+        main = importlib.import_module("app.main")
+        database = importlib.import_module("app.database")
+        with TestClient(main.app) as client:
+            local_topics = client.get("/api/topics")
+            assert local_topics.status_code == 200, local_topics.text
+            local_work = next(
+                topic
+                for topic in local_topics.json()
+                if topic["name"] == "Work"
+            )
+
+            dev = client.post(
+                "/api/auth/dev-login",
+                json={"email": "dev@example.com", "display_name": "Dev"},
+            ).json()
+            dev_topics_response = client.get("/api/topics")
+            assert dev_topics_response.status_code == 200, dev_topics_response.text
+            dev_topics = dev_topics_response.json()
+            dev_work = next(
+                topic for topic in dev_topics if topic["name"] == "Work"
+            )
+            dev_ids = {topic["id"] for topic in dev_topics}
+            assert dev_work["id"] != local_work["id"]
+            assert local_work["id"] not in dev_ids
+            assert "Health" in {topic["name"] for topic in dev_topics}
+
+            dashboard = client.get("/api/dashboard")
+            assert dashboard.status_code == 200, dashboard.text
+            dashboard_topics = dashboard.json()["topics"]
+            dashboard_work = next(
+                topic for topic in dashboard_topics if topic["name"] == "Work"
+            )
+            assert dashboard_work["id"] == dev_work["id"]
+            assert local_work["id"] not in {
+                topic["id"] for topic in dashboard_topics
+            }
+
+            item = client.post(
+                "/api/items",
+                json={"raw_text": "Ship the demo notes tomorrow"},
+            ).json()
+            assert item["owner_user_id"] == dev["id"]
+
+            def analyze(notes):
+                note_id = notes[0]["id"]
+                return {
+                    "buckets": [
+                        {
+                            "name": "Work",
+                            "notes": [
+                                {
+                                    "id": note_id,
+                                    "title": "Demo notes",
+                                    "priority": "Medium",
+                                    "tags": ["demo"],
+                                    "rationale": "Work note for this owner",
+                                }
+                            ],
+                        }
+                    ],
+                    "todos": [],
+                    "priority_view": {
+                        "High": [],
+                        "Medium": [{"id": note_id, "title": "Demo notes"}],
+                        "Low": [],
+                    },
+                    "mode": "openai",
+                }
+
+            monkeypatch.setattr(main, "analyze_inbox_with_openai", analyze)
+            analysis = client.post("/api/analyze")
+            assert analysis.status_code == 200, analysis.text
+
+            insight = client.get(f"/api/items/{item['id']}/insight").json()
+            assert insight["topic_id"] == dev_work["id"]
+            assert insight["topic_id"] != local_work["id"]
+
+            with database.SessionLocal() as session:
+                work_rows = session.scalars(
+                    database.select(database.TopicRecord).where(
+                        database.TopicRecord.name == "Work"
+                    )
+                ).all()
+            owners = {row.owner_user_id for row in work_rows}
+            assert dev["id"] in owners
+            assert len(owners) >= 2
+            assert {row.id for row in work_rows} >= {
+                local_work["id"],
+                dev_work["id"],
+            }
+
+            switched = client.post(
+                "/api/auth/dev-login",
+                json={"email": "local@life-inbox.local"},
+            )
+            assert switched.status_code == 200
+            local_again = client.get("/api/topics")
+            assert local_again.status_code == 200, local_again.text
+            local_again_work = next(
+                topic
+                for topic in local_again.json()
+                if topic["name"] == "Work"
+            )
+            assert local_again_work["id"] == local_work["id"]
+            assert dev_work["id"] not in {
+                topic["id"] for topic in local_again.json()
+            }
+    finally:
+        database_module = sys.modules.get("app.database")
+        if database_module is not None:
+            database_module.engine.dispose()
+        for module_name in module_names:
+            sys.modules.pop(module_name, None)
