@@ -85,6 +85,12 @@ Open http://127.0.0.1:8000
 
 - [ ] Dev login with email A; create a note; appears in list
 - [ ] Dev login with email B; note from A is not visible; delete of A’s id returns 404
+- [ ] Use two browser profiles (A and B). After both analyze, B's Organized
+  dashboard (High Priority, Recently Captured, Needs Review, Related Items,
+  topic counts), Tasks, Attention, Search and Ask show nothing of A's, and the
+  reverse holds
+- [ ] As B, A's ids return 404 for `/api/items/{id}`, `/file`, `/insight`,
+  task actions, topic edits and `/api/relations/{id}/dismiss`
 - [ ] Sign out clears session cookie
 - [ ] `/api/auth/google/start` returns 501 stub (no real OAuth)
 - [ ] `/api/health` returns status + environment metadata

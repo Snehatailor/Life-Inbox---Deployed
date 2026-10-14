@@ -956,7 +956,12 @@ async function loadLatestAnalysis() {
       undefined,
       'Unable to load saved analysis.'
     );
-    if (!data) return;
+    if (!data) {
+      document.getElementById('aiOutput').innerHTML =
+        '<span class="muted">No saved analysis yet for this account.</span>';
+      setStatus('analysisStatus', '');
+      return;
+    }
 
     populateCategoryFilter(data);
     renderAnalysis(data);
@@ -1431,6 +1436,7 @@ async function devLogin(event) {
     );
     setStatus('authStatus', `Signed in as ${user.email}`);
     await loadAuthUser();
+    await loadLatestAnalysis();
     await loadNotes();
     await loadTasks();
     await loadAttention();
@@ -1445,6 +1451,11 @@ async function logoutSession() {
     await fetchJson('/api/auth/logout', {method: 'POST'}, 'Unable to sign out.');
     setStatus('authStatus', 'Signed out.');
     await loadAuthUser();
+    await loadLatestAnalysis();
+    await loadNotes();
+    await loadTasks();
+    await loadAttention();
+    await loadDashboard();
   } catch {
     setStatus('authStatus', 'Sign-out failed.', true);
   }
