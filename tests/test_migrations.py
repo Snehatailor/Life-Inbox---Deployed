@@ -5,6 +5,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -131,7 +132,7 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
                 text("SELECT version_num FROM alembic_version")
             )
             topic_count = connection.scalar(text("SELECT COUNT(*) FROM topics"))
-        assert revision == "0011_multi_user_ownership"
+        assert revision == "0012_topics_per_owner_unique"
         assert topic_count >= 9
     finally:
         engine.dispose()
@@ -232,7 +233,7 @@ def test_upgrade_adopts_legacy_database_without_changing_notes(
             for note_id, note_text, created_at in existing_notes
         ]
         assert next_id == 10
-        assert revision == "0011_multi_user_ownership"
+        assert revision == "0012_topics_per_owner_unique"
     finally:
         engine.dispose()
 
@@ -318,7 +319,7 @@ def test_upgrade_consolidates_tasks_that_share_a_source(tmp_path, monkeypatch):
             )
         ]
         assert [tuple(link) for link in links] == [(1, 1)]
-        assert revision == "0011_multi_user_ownership"
+        assert revision == "0012_topics_per_owner_unique"
 
         # Milestone 2 drops the one-task-per-source unique index so one
         # inbox item may source multiple durable tasks.
@@ -355,5 +356,162 @@ def test_upgrade_consolidates_tasks_that_share_a_source(tmp_path, monkeypatch):
                 )
             ).all()
         assert [tuple(link) for link in multi_links] == [(1, 1), (2, 1)]
+    finally:
+        engine.dispose()
+
+
+def test_topic_uniqueness_is_per_owner_and_keeps_existing_rows(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    database_path = tmp_path / "topics_unique.db"
+    config = alembic_config(database_path)
+    command.upgrade(config, "0011_multi_user_ownership")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    with engine.connect() as connection:
+        before = connection.execute(
+            text(
+                """
+                SELECT id, name, description, owner_user_id, created_at,
+                       updated_at, archived
+                FROM topics
+                ORDER BY id
+                """
+            )
+        ).all()
+        assert any(
+            row.name == "Work" and row.owner_user_id == 1 for row in before
+        )
+        assert len(before) >= 9
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO topics (
+                        name, description, created_at, updated_at,
+                        archived, owner_user_id
+                    )
+                    VALUES (
+                        'Work', NULL, '2026-01-02T00:00:00+00:00',
+                        '2026-01-02T00:00:00+00:00', 0, 2
+                    )
+                    """
+                )
+            )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    try:
+        inspector = inspect(engine)
+        uniques = inspector.get_unique_constraints("topics")
+        assert not any(
+            list(constraint["column_names"]) == ["name"]
+            for constraint in uniques
+        )
+        assert any(
+            set(constraint["column_names"]) == {"owner_user_id", "name"}
+            for constraint in uniques
+        )
+        create_sql = ""
+        with engine.connect() as connection:
+            create_sql = connection.scalar(
+                text(
+                    """
+                    SELECT sql FROM sqlite_master
+                    WHERE type = 'table' AND name = 'topics'
+                    """
+                )
+            )
+            migrated = connection.execute(
+                text(
+                    """
+                    SELECT id, name, description, owner_user_id, created_at,
+                           updated_at, archived
+                    FROM topics
+                    ORDER BY id
+                    """
+                )
+            ).all()
+            sequence = connection.scalar(
+                text(
+                    """
+                    SELECT seq FROM sqlite_sequence WHERE name = 'topics'
+                    """
+                )
+            )
+            revision = connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            )
+        assert "AUTOINCREMENT" in create_sql
+        assert "uq_topics_name_owner" in create_sql
+        assert "UNIQUE (name)" not in create_sql
+        assert [tuple(row) for row in migrated] == [tuple(row) for row in before]
+        assert sequence >= max(row.id for row in before)
+        assert revision == "0012_topics_per_owner_unique"
+
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO users (
+                        email, display_name, auth_provider, created_at
+                    )
+                    VALUES (
+                        'dev@example.com', 'Dev', 'dev',
+                        '2026-01-02T00:00:00+00:00'
+                    )
+                    """
+                )
+            )
+            dev_id = connection.scalar(
+                text("SELECT id FROM users WHERE email = 'dev@example.com'")
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO topics (
+                        name, description, created_at, updated_at,
+                        archived, owner_user_id
+                    )
+                    VALUES (
+                        'Work', NULL, '2026-01-02T00:00:00+00:00',
+                        '2026-01-02T00:00:00+00:00', 0, :owner
+                    )
+                    """
+                ),
+                {"owner": dev_id},
+            )
+            owners = connection.execute(
+                text(
+                    """
+                    SELECT owner_user_id FROM topics
+                    WHERE name = 'Work'
+                    ORDER BY owner_user_id
+                    """
+                )
+            ).scalars().all()
+        assert owners == [1, dev_id]
+
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO topics (
+                            name, description, created_at, updated_at,
+                            archived, owner_user_id
+                        )
+                        VALUES (
+                            'Work', NULL, '2026-01-03T00:00:00+00:00',
+                            '2026-01-03T00:00:00+00:00', 0, :owner
+                        )
+                        """
+                    ),
+                    {"owner": dev_id},
+                )
     finally:
         engine.dispose()
