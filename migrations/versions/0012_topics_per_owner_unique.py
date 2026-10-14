@@ -69,6 +69,9 @@ def upgrade() -> None:
                 )
         return
 
+    # Postgres names UNIQUE(name) in the catalog (typically topics_name_key).
+    # Dropping the constraint also drops its backing index. Do not drop that
+    # index again; a cached reflection would still list it and fail the upgrade.
     for constraint in global_name_uniques:
         name = constraint.get("name")
         if not name:
@@ -77,20 +80,6 @@ def upgrade() -> None:
             )
         op.drop_constraint(name, "topics", type_="unique")
 
-    # A UNIQUE(name) index that is not a table constraint (Postgres may
-    # already have removed the constraint's backing index above).
-    inspector = sa.inspect(bind)
-    for index in inspector.get_indexes("topics"):
-        if index.get("unique") and list(index.get("column_names") or []) == ["name"]:
-            index_name = index.get("name")
-            if index_name:
-                op.drop_index(index_name, table_name="topics")
-
-    inspector = sa.inspect(bind)
-    has_per_owner = any(
-        _column_set(constraint) == {"owner_user_id", "name"}
-        for constraint in inspector.get_unique_constraints("topics")
-    )
     if not has_per_owner:
         op.create_unique_constraint(
             _PER_OWNER_UNIQUE,
