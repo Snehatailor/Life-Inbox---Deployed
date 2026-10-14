@@ -81,7 +81,9 @@ Open http://127.0.0.1:8000
 - [ ] Analyze inbox includes ready URL items
 - [ ] Private/local URLs (127.0.0.1, localhost) rejected before fetch
 
-## Multi-user / auth smoke (Milestone 6+)
+## Multi-user / auth smoke
+
+Turn Dev Login on first (`LIFE_INBOX_ALLOW_DEV_LOGIN=true` in the server terminal, then restart). It is passwordless. With it left off, the app uses one Local Owner.
 
 - [ ] Dev login with email A; create a note; appears in list
 - [ ] Dev login with email B; note from A is not visible; delete of A’s id returns 404
@@ -96,7 +98,7 @@ Open http://127.0.0.1:8000
 - [ ] `/api/health` returns status + environment metadata
 - [ ] Spoofing `X-User-Id` does not change ownership
 
-## Attention / Calendar smoke (Milestone 5+)
+## Attention / calendar smoke
 
 - [ ] After analysis, Attention section shows Today / Upcoming / Overdue / Unscheduled
 - [ ] Daily briefing summary and suggested focus appear
