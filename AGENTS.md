@@ -19,7 +19,18 @@ Optional AI:
 ```bash
 export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5-mini"
+export OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 ```
+
+Local runs should also set `LIFE_INBOX_ENV=local`, `LIFE_INBOX_ALLOW_DEV_LOGIN=1`,
+and `LIFE_INBOX_SESSION_SECRET` (do not commit it). Without `OPENAI_API_KEY`:
+deterministic organizer, extractive Ask, and a manual voice transcript. With a
+key: live organize, grounded LLM Ask, and Whisper. Image OCR needs the
+Tesseract binary and `pytesseract` (not in `requirements.txt`). Image vision is
+not a live API.
+
+Extend `main` or tag `life-inbox-v1` on a student fork. `class-starter` is the
+earlier baseline, not the branch to build on.
 
 ## Tests
 

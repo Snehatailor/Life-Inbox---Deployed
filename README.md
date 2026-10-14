@@ -17,7 +17,22 @@ It preserves the features already present in the notebook:
 
 ## 2. Set up the project
 
-Open a terminal, enter this folder, and create a virtual environment:
+Fork [AI-WORKSHOP-SEP26/life-inbox](https://github.com/AI-WORKSHOP-SEP26/life-inbox)
+into your own GitHub account, then clone **your fork**. Check out the classroom
+reference: branch `main`, or tag `life-inbox-v1`. `class-starter` is the earlier
+pre-buildout baseline, not the branch to build on.
+
+```bash
+git clone https://github.com/YOUR_GITHUB_USERNAME/life-inbox.git
+cd life-inbox
+git checkout main
+git checkout -b my-change
+```
+
+Tag `life-inbox-v1` marks that same classroom reference. To start from the tag,
+run `git checkout life-inbox-v1` before `git checkout -b my-change`.
+
+Open a terminal in this folder and create a virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -38,12 +53,38 @@ python -m pip install -r requirements.txt
 
 ## 3. Configure and migrate the database
 
-Life Inbox uses SQLite by default at `data/life_inbox.db`. To use another
-database location, set `DATABASE_URL` before running Alembic or the app:
+Use a SQLite file you own. The default path is `data/life_inbox.db`
+(`data/*.db` and `data/uploads/` are gitignored). An absolute path keeps
+Alembic and the app on the same file. On Windows, a URL looks like
+`sqlite:///C:/Users/you/life_inbox.db`.
+
+The app reads environment variables. It does not load a `.env` file by itself.
+Copy the names from `.env.example` and export them before Alembic or uvicorn:
 
 ```bash
 export DATABASE_URL="sqlite:////absolute/path/to/life_inbox.db"
+export LIFE_INBOX_UPLOAD_DIR="/absolute/path/to/uploads"
+export LIFE_INBOX_SESSION_SECRET="replace-with-a-long-local-secret"
+export LIFE_INBOX_ENV=local
+export LIFE_INBOX_ALLOW_DEV_LOGIN=1
 ```
+
+On Windows PowerShell:
+
+```powershell
+$env:DATABASE_URL="sqlite:///C:/Users/you/life_inbox.db"
+$env:LIFE_INBOX_UPLOAD_DIR="C:/Users/you/life-inbox-uploads"
+$env:LIFE_INBOX_SESSION_SECRET="replace-with-a-long-local-secret"
+$env:LIFE_INBOX_ENV="local"
+$env:LIFE_INBOX_ALLOW_DEV_LOGIN="1"
+```
+
+`LIFE_INBOX_ENV=local` keeps SQLite valid. `LIFE_INBOX_ALLOW_DEV_LOGIN=1`
+turns on passwordless dev login. `LIFE_INBOX_SESSION_SECRET` signs the session
+cookie; if you leave it empty locally, the app uses a built-in default. Set
+your own value and do not commit it.
+
+Never commit `.env`, API keys, database files, or uploads.
 
 For a new or empty local database, apply all migrations with:
 
@@ -81,9 +122,10 @@ creation, listing, editing, and deletion. Items include:
 - `raw_text`, `created_at`, and optional `updated_at`.
 
 Supported captures: `text` notes, `url` article links (`POST /api/items/url`),
-and `pdf` uploads (`POST /api/items/pdf`, multipart field `file`). Image and
-voice capture are planned. PDF originals are stored under `data/uploads/` (or
-`LIFE_INBOX_UPLOAD_DIR`); preview via `GET /api/items/{id}/file`.
+`pdf` uploads (`POST /api/items/pdf`, multipart field `file`), images
+(`POST /api/items/image`), and voice (`POST /api/items/voice`). PDF, image, and
+voice originals are stored under `data/uploads/` (or `LIFE_INBOX_UPLOAD_DIR`);
+preview via `GET /api/items/{id}/file`.
 
 `GET /api/items` accepts optional `q`, `item_type`, `category`, `priority`,
 `processing_status`, `limit` (1–500, default 100), and `offset` query
@@ -137,12 +179,26 @@ dismissed status is never changed by AI analysis.
 
 ## 4. Optional: configure OpenAI
 
-If you want AI analysis instead of the local fallback, set your API key in the
-terminal before starting the application:
+These work with no API key:
+
+- deterministic organizer (keyword fallback);
+- extractive Ask (citations from your inbox, no LLM);
+- voice upload with a transcript you edit by hand.
+
+These need `OPENAI_API_KEY`:
+
+- live organize (`OPENAI_MODEL`, default `gpt-5-mini`);
+- grounded LLM Ask (same model);
+- Whisper transcription (`OPENAI_TRANSCRIPTION_MODEL`, default `whisper-1`).
+
+Image OCR needs the Tesseract program installed separately, plus `pytesseract`
+(not listed in `requirements.txt`). Image vision is not live; descriptions stay
+on the local fallback even when a key is set.
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
 export OPENAI_MODEL="gpt-5-mini"
+export OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 ```
 
 On Windows PowerShell:
@@ -150,9 +206,10 @@ On Windows PowerShell:
 ```powershell
 $env:OPENAI_API_KEY="your-api-key"
 $env:OPENAI_MODEL="gpt-5-mini"
+$env:OPENAI_TRANSCRIPTION_MODEL="whisper-1"
 ```
 
-Do not put the real key in source code or commit it to Git.
+Do not put a real key in source code or commit it.
 
 ## 5. Start Life Inbox
 
@@ -177,6 +234,10 @@ python -m pytest
 ```
 
 The tests use temporary SQLite databases and do not call OpenAI.
+
+Before changing code with Cursor or a similar assistant, point it at
+`AGENTS.md`. Schema changes go through Alembic only. Tests must keep using
+temporary databases and must not call live paid APIs.
 
 ## 7. Optional: add demonstration notes
 
