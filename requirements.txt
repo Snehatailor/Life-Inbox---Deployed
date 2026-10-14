@@ -1,4 +1,5 @@
 fastapi
+python-multipart
 uvicorn
 pydantic
 sqlalchemy
@@ -7,3 +8,6 @@ openai
 requests
 pytest
 httpx
+pypdf
+Pillow
+psycopg[binary]

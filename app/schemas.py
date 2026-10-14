@@ -62,8 +62,21 @@ class InboxItem(BaseModel):
     original_filename: Optional[str]
     mime_type: Optional[str]
     processing_status: str
+    error_message: Optional[str] = None
+    storage_path: Optional[str] = None
+    extracted_text: Optional[str] = None
+    ai_description: Optional[str] = None
+    owner_user_id: Optional[int] = None
     created_at: str
     updated_at: Optional[str]
+
+
+class UrlItemCreate(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
+class ExtractedTextUpdate(BaseModel):
+    extracted_text: str = Field(min_length=0, max_length=20000)
 
 
 Priority = Literal["High", "Medium", "Low"]
@@ -83,6 +96,8 @@ class AnalysisNote(StrictAnalysisModel):
     id: int
     title: str = Field(min_length=1)
     priority: Priority
+    tags: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
 
 
 class AnalysisBucket(StrictAnalysisModel):
@@ -160,6 +175,8 @@ class AnalysisResult(StrictAnalysisModel):
 class PersistedAnalysis(AnalysisResult):
     analysis_run_id: int
     generated_at: str
+    is_stale: bool = False
+    inbox_fingerprint: Optional[str] = None
 
 
 TaskStatus = Literal["open", "completed", "dismissed"]
@@ -171,7 +188,135 @@ class Task(BaseModel):
     text: str
     priority: Priority
     timing_text: Optional[str]
+    ai_timing_text: Optional[str] = None
+    timing_confirmed: bool = False
+    due_on: Optional[str] = None
+    due_confidence: Optional[str] = None
+    snoozed_until: Optional[str] = None
+    reminder_at: Optional[str] = None
     status: TaskStatus
     source_item_ids: List[int]
     created_at: str
     updated_at: str
+
+
+class TaskTimingConfirm(BaseModel):
+    timing_text: Optional[str] = Field(default=None, max_length=200)
+
+
+class TaskSnoozeRequest(BaseModel):
+    until: str = Field(min_length=8, max_length=32)
+
+
+class TaskReminderRequest(BaseModel):
+    reminder_at: str = Field(min_length=8, max_length=32)
+
+
+class CalendarPreviewRequest(BaseModel):
+    task_id: int
+    title: Optional[str] = Field(default=None, max_length=200)
+    start_date: Optional[str] = Field(default=None, max_length=32)
+    description: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CalendarConfirmRequest(BaseModel):
+    draft_id: str = Field(min_length=4, max_length=80)
+
+
+class TopicCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=400)
+
+
+class TopicUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=400)
+    archived: Optional[bool] = None
+
+
+class Topic(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    archived: bool
+    item_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class InsightOverrideUpdate(BaseModel):
+    user_title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    user_topic_id: Optional[int] = None
+    user_priority: Optional[Priority] = None
+    user_tags: Optional[List[str]] = None
+    clear_overrides: bool = False
+    needs_review: Optional[bool] = None
+
+
+class ItemInsight(BaseModel):
+    item_id: int
+    analysis_run_id: int
+    category: str
+    concise_title: str
+    priority: Priority
+    topic_id: Optional[int]
+    tags: List[str]
+    rationale: Optional[str]
+    user_title: Optional[str]
+    user_topic_id: Optional[int]
+    user_priority: Optional[Priority]
+    user_tags: Optional[List[str]]
+    effective_title: str
+    effective_priority: Priority
+    effective_topic_id: Optional[int]
+    effective_tags: List[str]
+    needs_review: bool
+    updated_at: str
+    has_user_overrides: bool
+
+
+class ItemRelation(BaseModel):
+    id: int
+    item_id_a: int
+    item_id_b: int
+    relation_type: str
+    score: float
+    dismissed: bool
+    created_at: str
+
+
+class SearchHit(BaseModel):
+    item_id: int
+    item_type: str
+    title: str
+    excerpt: str
+    source_kind: str
+    preview_url: Optional[str] = None
+    score: float
+    keyword_score: float
+    semantic_score: float
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+    item_type: Optional[str] = Field(default=None, max_length=100)
+
+
+class AskCitation(BaseModel):
+    id: str
+    item_id: int
+    item_type: str
+    title: str
+    excerpt: str
+    source_kind: str
+    preview_url: Optional[str] = None
+    score: float
+
+
+class AskResponse(BaseModel):
+    question: str
+    answer: str
+    confidence: Literal["high", "medium", "insufficient"]
+    citations: List[AskCitation]
+    answer_kind: Literal["grounded_summary", "model_generated"]
+    mode: Literal["llm_grounded", "extractive_fallback"] = "extractive_fallback"

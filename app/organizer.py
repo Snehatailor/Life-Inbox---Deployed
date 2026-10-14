@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 
 from app.schemas import AnalysisResult
 
@@ -59,40 +60,99 @@ def bucket_for_text(text: str) -> str:
     return "Personal / Reference"
 
 
+def _tags_for_text(text: str) -> list[str]:
+    lowered = text.lower()
+    tags = []
+    tag_rules = [
+        ("urgent", ["today", "tomorrow", "urgent", "asap", "deadline"]),
+        ("errand", ["buy", "pick up", "order", "groceries"]),
+        ("follow-up", ["call", "ask", "follow up", "email"]),
+        ("learning", ["read", "watch", "learn", "article"]),
+        ("money", ["bill", "tax", "pay", "insurance"]),
+    ]
+    for tag, markers in tag_rules:
+        if any(marker in lowered for marker in markers):
+            tags.append(tag)
+    return tags
+
+
+def _extract_timing(text: str) -> str | None:
+    lowered = text.lower()
+    for phrase in (
+        "today",
+        "tomorrow",
+        "this weekend",
+        "this week",
+        "next week",
+        "before friday",
+        "before thursday",
+    ):
+        if phrase in lowered:
+            return phrase
+    return None
+
+
+def _split_action_tasks(text: str, note_id: int, priority: str) -> list[dict]:
+    """One source may yield multiple durable tasks when sentences look actionable."""
+    action_markers = [
+        "call", "buy", "send", "ask", "finish", "submit", "pay", "book",
+        "pick up", "prepare", "renew", "follow up", "need to", "remember to",
+        "research", "look into", "order",
+    ]
+    chunks = [
+        part.strip()
+        for part in re.split(r"[.!?\n]+", text)
+        if part and part.strip()
+    ]
+    todos = []
+    for chunk in chunks:
+        if any(marker in chunk.lower() for marker in action_markers):
+            todos.append(
+                {
+                    "task": chunk,
+                    "priority": priority_for_text(chunk),
+                    "source_note_ids": [note_id],
+                    "when": _extract_timing(chunk) or _extract_timing(text),
+                }
+            )
+    if not todos and any(marker in text.lower() for marker in action_markers):
+        todos.append(
+            {
+                "task": text,
+                "priority": priority,
+                "source_note_ids": [note_id],
+                "when": _extract_timing(text),
+            }
+        )
+    return todos
+
+
 def fallback_analyze(notes: list[dict]) -> dict:
     """Deterministic fallback so the demo still works if the API is unavailable."""
     buckets = {}
     todos = []
     priority_view = {"High": [], "Medium": [], "Low": []}
 
-    action_markers = [
-        "call", "buy", "send", "ask", "finish", "submit", "pay", "book",
-        "pick up", "prepare", "renew", "follow up", "need to", "remember to",
-        "research", "look into", "order"
-    ]
-
     for note in notes:
         text = note["text"]
         bucket = bucket_for_text(text)
         priority = priority_for_text(text)
         title = text[:72] + ("..." if len(text) > 72 else "")
+        tags = _tags_for_text(text)
 
         item = {
             "id": note["id"],
             "title": title,
             "priority": priority,
+            "tags": tags,
+            "rationale": (
+                f"Matched topic “{bucket}” from keywords in the note."
+            ),
         }
 
         buckets.setdefault(bucket, []).append(item)
         priority_view[priority].append({"id": note["id"], "title": title})
-
-        if any(marker in text.lower() for marker in action_markers):
-            todos.append({
-                "task": text,
-                "priority": priority,
-                "source_note_ids": [note["id"]],
-                "when": None,
-            })
+        todos.extend(_split_action_tasks(text, note["id"], priority))
 
     return {
         "buckets": [
@@ -147,7 +207,9 @@ Return ONLY valid JSON in exactly this shape:
         {{
           "id": 1,
           "title": "concise title preserving the note's meaning",
-          "priority": "High"
+          "priority": "High",
+          "tags": ["follow-up"],
+          "rationale": "short reason this note belongs in the bucket"
         }}
       ]
     }}
@@ -172,9 +234,9 @@ Return ONLY valid JSON in exactly this shape:
 Rules:
 1. Organize the full inbox, not each note independently.
 2. Every saved note must appear in exactly one bucket.
-3. Use a small number of useful buckets such as Work, Personal, Money & Admin,
-   Learning, Shopping & Errands, Health, Travel, Ideas, People, or another
-   category only when it is genuinely clearer.
+3. Prefer existing topic/bucket names when they fit: Work, Money & Admin,
+   Learning, Shopping & Errands, Health, Travel, Ideas, People,
+   Personal / Reference. Invent a new bucket only when genuinely clearer.
 4. Priority must be one of High, Medium, Low.
 5. High priority means explicit urgency, a near deadline, or a clearly time-sensitive obligation.
 6. Medium means actionable but not immediately urgent.
@@ -185,6 +247,7 @@ Rules:
 11. Preserve relative timing exactly when present, for example "tomorrow" or "this weekend".
 12. Keep titles and ToDos short and concrete. No motivational language, commentary, or prose outside the JSON.
 13. priority_view should include every note once, grouped by priority.
+14. Include a short rationale and a few useful tags for each note.
 
 Saved notes:
 {json.dumps(compact_notes, ensure_ascii=False)}
