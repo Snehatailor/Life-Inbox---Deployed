@@ -175,9 +175,10 @@ def test_delete_then_load_more_includes_note_101():
 const assert = require('assert');
 const P = require({json.dumps(str(HELPER))});
 const state = P.createState(100);
+const pageTypes = ['text', 'url', 'pdf', 'image', 'voice'];
 const page1 = Array.from({{length: 100}}, (_, i) => ({{
   id: i + 1,
-  item_type: 'text',
+  item_type: pageTypes[i % pageTypes.length],
   raw_text: 'Pagination note ' + String(i + 1).padStart(3, '0')
 }}));
 P.applyFetchedPage(state, page1, {{append: false}});
@@ -187,8 +188,8 @@ P.afterLoadedNoteDeleted(state, 1);
 assert.equal(state.loadedOffset, 99);
 
 const page2 = [
-  {{id: 101, item_type: 'text', raw_text: 'Pagination note 101'}},
-  {{id: 102, item_type: 'text', raw_text: 'Pagination note 102'}}
+  {{id: 101, item_type: 'pdf', raw_text: 'Pagination note 101'}},
+  {{id: 102, item_type: 'voice', raw_text: 'Pagination note 102'}}
 ];
 P.applyFetchedPage(state, page2, {{append: true}});
 
@@ -214,6 +215,157 @@ console.log(JSON.stringify({{
     assert result["firstId"] == 2
     assert result["lastId"] == 102
     assert result["loadedOffset"] == 101
+
+
+def test_apply_fetched_page_keeps_each_supported_type_once():
+    """A mixed page retains text, url, pdf, image, and voice exactly once."""
+    result = run_helper(
+        f"""
+const assert = require('assert');
+const P = require({json.dumps(str(HELPER))});
+const state = P.createState(100);
+const rows = [
+  {{id: 1, item_type: 'text', raw_text: 'a note'}},
+  {{id: 2, item_type: 'url', title: 'Example', source_url: 'https://example.com'}},
+  {{id: 3, item_type: 'pdf', original_filename: 'smoke.pdf', storage_path: 'pdfs/a.pdf'}},
+  {{id: 4, item_type: 'image', original_filename: 'smoke.png', storage_path: 'images/a.png'}},
+  {{id: 5, item_type: 'voice', original_filename: 'smoke.wav', storage_path: 'audio/a.wav'}}
+];
+const applied = P.applyFetchedPage(state, rows, {{append: false}});
+const ids = state.loadedItems.map((item) => item.id);
+const types = state.loadedItems.map((item) => item.item_type);
+assert.deepEqual(types, ['text', 'url', 'pdf', 'image', 'voice']);
+assert.deepEqual(ids, [1, 2, 3, 4, 5]);
+assert.equal(new Set(ids).size, ids.length);
+assert.equal(new Set(types).size, types.length);
+assert.deepEqual(applied.textNotes.map((item) => item.id), ids);
+assert.equal(state.loadedOffset, rows.length);
+assert.equal(state.hasMore, false);
+console.log(JSON.stringify({{
+  ids,
+  types,
+  loadedOffset: state.loadedOffset
+}}));
+"""
+    )
+    assert result["types"] == ["text", "url", "pdf", "image", "voice"]
+    assert result["ids"] == [1, 2, 3, 4, 5]
+    assert len(result["ids"]) == len(set(result["ids"]))
+    assert result["loadedOffset"] == 5
+
+
+def test_mixed_type_pages_append_without_duplicates():
+    result = run_helper(
+        f"""
+const assert = require('assert');
+const P = require({json.dumps(str(HELPER))});
+const state = P.createState(3);
+const page1 = [
+  {{id: 1, item_type: 'text', raw_text: 'one'}},
+  {{id: 2, item_type: 'url', source_url: 'https://example.com/a'}},
+  {{id: 3, item_type: 'pdf', original_filename: 'a.pdf'}}
+];
+P.applyFetchedPage(state, page1, {{append: false}});
+assert.equal(state.loadedOffset, 3);
+assert.equal(state.hasMore, true);
+const page2 = [
+  {{id: 4, item_type: 'image', original_filename: 'a.png'}},
+  {{id: 5, item_type: 'voice', original_filename: 'a.wav'}}
+];
+const applied = P.applyFetchedPage(state, page2, {{append: true}});
+const ids = state.loadedItems.map((item) => item.id);
+assert.deepEqual(ids, [1, 2, 3, 4, 5]);
+assert.equal(new Set(ids).size, ids.length);
+assert.deepEqual(applied.textNotes.map((item) => item.id), [4, 5]);
+assert.equal(state.loadedOffset, 5);
+assert.equal(state.hasMore, false);
+console.log(JSON.stringify({{ids, loadedOffset: state.loadedOffset}}));
+"""
+    )
+    assert result["ids"] == [1, 2, 3, 4, 5]
+    assert result["loadedOffset"] == 5
+
+
+def test_delete_then_load_more_keeps_shifted_mixed_item():
+    """Deleting a non-text card must not skip the item that slides into the page."""
+    result = run_helper(
+        f"""
+const assert = require('assert');
+const P = require({json.dumps(str(HELPER))});
+const state = P.createState(4);
+const types = ['text', 'url', 'pdf', 'image', 'voice', 'text'];
+const page1 = [1, 2, 3, 4].map((id) => ({{
+  id,
+  item_type: types[id - 1],
+  raw_text: 'item ' + id
+}}));
+P.applyFetchedPage(state, page1, {{append: false}});
+assert.equal(state.loadedOffset, 4);
+assert.equal(P.afterLoadedNoteDeleted(state, 3), true);
+assert.equal(state.loadedOffset, 3);
+assert.deepEqual(state.loadedItems.map((item) => item.id), [1, 2, 4]);
+
+const page2 = [
+  {{id: 5, item_type: 'voice', original_filename: 'note.wav'}},
+  {{id: 6, item_type: 'text', raw_text: 'item 6'}}
+];
+P.applyFetchedPage(state, page2, {{append: true}});
+const ids = state.loadedItems.map((item) => item.id);
+assert.deepEqual(ids, [1, 2, 4, 5, 6]);
+assert.ok(ids.includes(5));
+assert.ok(!ids.includes(3));
+assert.equal(new Set(ids).size, ids.length);
+assert.equal(state.loadedOffset, 5);
+assert.equal(state.hasMore, false);
+console.log(JSON.stringify({{
+  ids,
+  loadedOffset: state.loadedOffset,
+  includes5: ids.includes(5)
+}}));
+"""
+    )
+    assert result["includes5"] is True
+    assert result["ids"] == [1, 2, 4, 5, 6]
+    assert result["loadedOffset"] == 5
+
+
+def test_unsupported_and_malformed_rows_are_dropped_but_counted():
+    """Unknown types and rows without a supported item_type stay out of the list."""
+    result = run_helper(
+        f"""
+const assert = require('assert');
+const P = require({json.dumps(str(HELPER))});
+const state = P.createState(100);
+const rows = [
+  {{id: 1, item_type: 'text', raw_text: 'keep'}},
+  {{id: 2, item_type: 'email'}},
+  {{id: 3, item_type: 'article'}},
+  {{id: 4, item_type: 'document'}},
+  {{id: 5, item_type: 'audio'}},
+  {{id: 6}},
+  {{id: 7, item_type: ''}},
+  {{id: 8, item_type: null}},
+  null,
+  {{id: 9, item_type: 'url', source_url: 'https://example.com'}}
+];
+const applied = P.applyFetchedPage(state, rows, {{append: false}});
+const ids = state.loadedItems.map((item) => item.id);
+const types = state.loadedItems.map((item) => item.item_type);
+assert.deepEqual(ids, [1, 9]);
+assert.deepEqual(types, ['text', 'url']);
+assert.deepEqual(applied.textNotes.map((item) => item.id), ids);
+assert.equal(state.loadedOffset, rows.length);
+assert.equal(state.hasMore, false);
+console.log(JSON.stringify({{
+  ids,
+  types,
+  loadedOffset: state.loadedOffset
+}}));
+"""
+    )
+    assert result["ids"] == [1, 9]
+    assert result["types"] == ["text", "url"]
+    assert result["loadedOffset"] == 10
 
 
 def test_static_assets_include_pagination_helper(client):

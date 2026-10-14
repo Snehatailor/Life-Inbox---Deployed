@@ -15,6 +15,24 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const PAGE_SIZE = 100;
 
+  // Real item_type strings stored by the API. Article/document/audio are
+  // capture kinds, not separate type values (url, pdf, voice).
+  const SUPPORTED_INBOX_ITEM_TYPES = new Set([
+    'text',
+    'url',
+    'pdf',
+    'image',
+    'voice'
+  ]);
+
+  function isSupportedInboxItem(item) {
+    return Boolean(
+      item &&
+      typeof item === 'object' &&
+      SUPPORTED_INBOX_ITEM_TYPES.has(item.item_type)
+    );
+  }
+
   function createState(pageSize = PAGE_SIZE) {
     return {
       pageSize,
@@ -49,16 +67,20 @@
 
   /**
    * Apply a successful page fetch.
+   * Keeps every supported inbox item (text, url, pdf, image, voice).
+   * Drops malformed rows and unsupported item_type values. Offset still
+   * advances by the full API page length so a dropped row cannot shift
+   * the next page.
    * @param {object} state
-   * @param {Array} rows - API rows for this page (all item types)
+   * @param {Array} rows - API rows for this page
    * @param {{append?: boolean}} options
-   * @returns {{textNotes: Array, hasMore: boolean}}
+   * @returns {{textNotes: Array, hasMore: boolean}} textNotes is every kept row
    */
   function applyFetchedPage(state, rows, {append = false} = {}) {
     if (!append) {
       resetForReload(state);
     }
-    const textNotes = rows.filter(item => item.item_type === 'text');
+    const textNotes = rows.filter(isSupportedInboxItem);
     state.loadedItems = append
       ? state.loadedItems.concat(textNotes)
       : textNotes;
