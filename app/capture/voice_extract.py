@@ -108,6 +108,21 @@ def _title_from_filename(filename: str) -> str:
     return stem or "Voice note"
 
 
+def _transcription_model() -> str:
+    """Model for audio transcription; override via OPENAI_TRANSCRIPTION_MODEL."""
+    return (
+        os.getenv("OPENAI_TRANSCRIPTION_MODEL", "").strip()
+        or "whisper-1"
+    )
+
+
+def _friendly_transcription_unavailable_note() -> str:
+    return (
+        "Transcription is temporarily unavailable. You can edit the "
+        "transcript manually, or retry processing later."
+    )
+
+
 def transcribe_audio(
     data: bytes,
     *,
@@ -139,28 +154,41 @@ def transcribe_audio(
             "available": False,
             "note": (
                 "Transcription not configured. Set OPENAI_API_KEY for live "
-                "Whisper transcription, or edit the transcript manually."
+                "transcription, or edit the transcript manually."
             ),
         }
 
-    # Live Whisper is intentionally not called from the default path so
-    # automated tests never incur paid API usage. Extend this adapter for
-    # explicit manual smoke testing when desired.
-    logger.info(
-        "Skipping live transcription for %s (%s bytes); using empty transcript placeholder.",
-        original_filename,
-        len(data),
-    )
-    return {
-        "text": "",
-        "provider": "openai_whisper_skipped",
-        "available": False,
-        "note": (
-            "Live transcription adapter is present but skipped in this build "
-            "to avoid unpaid/paid API calls from automated paths. Edit the "
-            "transcript manually or extend the adapter for smoke tests."
-        ),
-    }
+    try:
+        from openai import OpenAI
+
+        client = OpenAI()
+        model = _transcription_model()
+        safe_name = _normalize_filename(original_filename)
+        result = client.audio.transcriptions.create(
+            model=model,
+            file=(safe_name, data, mime_type or "application/octet-stream"),
+        )
+        if isinstance(result, str):
+            text = result.strip()
+        else:
+            text = str(getattr(result, "text", "") or "").strip()
+        return {
+            "text": text,
+            "provider": "openai",
+            "available": True,
+            "note": None if text else "Transcription returned no spoken text.",
+        }
+    except Exception:
+        logger.exception(
+            "Voice transcription failed for %s; preserving audio with empty transcript",
+            original_filename,
+        )
+        return {
+            "text": "",
+            "provider": "unavailable",
+            "available": False,
+            "note": _friendly_transcription_unavailable_note(),
+        }
 
 
 def process_voice_bytes(

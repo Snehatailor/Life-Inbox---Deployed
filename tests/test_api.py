@@ -1661,6 +1661,203 @@ def test_voice_transcript_is_editable_and_analyzable(client, monkeypatch):
     assert updated["id"] in ids
 
 
+def _mock_openai_transcription(monkeypatch, text=None, *, raise_on_create=None):
+    import openai
+
+    def create(**_kwargs):
+        if raise_on_create is not None:
+            raise raise_on_create
+        return SimpleNamespace(text=text or "")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-test")
+    monkeypatch.delenv("LIFE_INBOX_DISABLE_TRANSCRIPTION", raising=False)
+    monkeypatch.setattr(
+        openai,
+        "OpenAI",
+        lambda: SimpleNamespace(
+            audio=SimpleNamespace(
+                transcriptions=SimpleNamespace(create=create)
+            )
+        ),
+    )
+
+
+def test_voice_transcription_success_persists_transcript(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+
+    wav = make_wav_bytes()
+    _mock_openai_transcription(
+        monkeypatch,
+        "Remember to renew car insurance before Friday",
+    )
+
+    item = client.post(
+        "/api/items/voice",
+        files={"file": ("memo.wav", wav, "audio/wav")},
+    ).json()
+
+    assert item["processing_status"] == "ready"
+    assert item["extracted_text"] == "Remember to renew car insurance before Friday"
+    assert "car insurance" in (item["raw_text"] or "").lower()
+    assert "transcript pending" not in (item["raw_text"] or "").lower()
+    assert "OPENAI" not in (item["raw_text"] or "")
+    assert "exception" not in (item.get("error_message") or "").lower()
+
+    audio = client.get(f"/api/items/{item['id']}/file")
+    assert audio.status_code == 200
+    assert audio.content.startswith(b"RIFF")
+    assert audio.content == wav
+
+
+def test_voice_transcription_no_key_keeps_item_editable(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LIFE_INBOX_DISABLE_TRANSCRIPTION", raising=False)
+
+    item = client.post(
+        "/api/items/voice",
+        files={"file": ("memo.wav", make_wav_bytes(), "audio/wav")},
+    ).json()
+    assert item["processing_status"] == "ready"
+    assert item["extracted_text"] == ""
+    assert "transcript pending" in (item["raw_text"] or "").lower()
+    assert "not configured" in (item["raw_text"] or "").lower()
+
+    updated = client.patch(
+        f"/api/items/{item['id']}/extracted-text",
+        json={"extracted_text": "Manual transcript about dentist appointment"},
+    ).json()
+    assert "dentist" in updated["extracted_text"]
+
+    audio = client.get(f"/api/items/{item['id']}/file")
+    assert audio.status_code == 200
+    assert audio.content.startswith(b"RIFF")
+
+
+def test_voice_transcription_api_failure_preserves_audio(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+
+    wav = make_wav_bytes()
+    _mock_openai_transcription(
+        monkeypatch,
+        raise_on_create=RuntimeError("OPENAI_API_KEY=super-secret provider boom"),
+    )
+
+    item = client.post(
+        "/api/items/voice",
+        files={"file": ("memo.wav", wav, "audio/wav")},
+    ).json()
+
+    assert item["processing_status"] == "ready"
+    assert item["extracted_text"] == ""
+    assert "temporarily unavailable" in (item["raw_text"] or "").lower()
+    assert "super-secret" not in (item["raw_text"] or "")
+    assert "OPENAI_API_KEY" not in (item["raw_text"] or "")
+    assert "provider boom" not in (item["raw_text"] or "")
+    assert "Traceback" not in (item["raw_text"] or "")
+
+    audio = client.get(f"/api/items/{item['id']}/file")
+    assert audio.status_code == 200
+    assert audio.content == wav
+
+    # Manual edit still works after provider failure.
+    updated = client.patch(
+        f"/api/items/{item['id']}/extracted-text",
+        json={"extracted_text": "Edited after failed auto transcription"},
+    ).json()
+    assert updated["extracted_text"].startswith("Edited after")
+
+
+def test_voice_transcription_uses_env_model(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+    import openai
+
+    seen = {}
+
+    def create(**kwargs):
+        seen["model"] = kwargs.get("model")
+        return SimpleNamespace(text="hello from custom model")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-test")
+    monkeypatch.setenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
+    monkeypatch.delenv("LIFE_INBOX_DISABLE_TRANSCRIPTION", raising=False)
+    monkeypatch.setattr(
+        openai,
+        "OpenAI",
+        lambda: SimpleNamespace(
+            audio=SimpleNamespace(
+                transcriptions=SimpleNamespace(create=create)
+            )
+        ),
+    )
+
+    item = client.post(
+        "/api/items/voice",
+        files={"file": ("memo.wav", make_wav_bytes(), "audio/wav")},
+    ).json()
+    assert seen["model"] == "gpt-4o-mini-transcribe"
+    assert item["extracted_text"] == "hello from custom model"
+
+
+def test_voice_transcription_owner_isolation(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+
+    _mock_openai_transcription(
+        monkeypatch,
+        "Alice private voice memo about yacht taxes",
+    )
+    alice = client.post(
+        "/api/auth/dev-login",
+        json={"email": "alice-voice@example.com"},
+    ).json()
+    alice_item = client.post(
+        "/api/items/voice",
+        files={"file": ("alice.wav", make_wav_bytes(), "audio/wav")},
+    ).json()
+    assert alice_item["owner_user_id"] == alice["id"]
+    assert "yacht" in alice_item["extracted_text"].lower()
+
+    bob = client.post(
+        "/api/auth/dev-login",
+        json={"email": "bob-voice@example.com"},
+    ).json()
+    assert bob["id"] != alice["id"]
+    missing = client.get(f"/api/items/{alice_item['id']}")
+    assert missing.status_code == 404
+    audio = client.get(f"/api/items/{alice_item['id']}/file")
+    assert audio.status_code == 404
+
+    ask = client.post(
+        "/api/ask",
+        json={"question": "What about yacht taxes?"},
+    ).json()
+    assert all(c["item_id"] != alice_item["id"] for c in ask["citations"])
+    assert "yacht" not in ask["answer"].lower()
+
+
+def test_voice_transcript_flows_into_ask_retrieval(client, monkeypatch):
+    from tests.voice_fixtures import make_wav_bytes
+
+    _mock_openai_transcription(
+        monkeypatch,
+        "Order Atomic Habits this weekend after Rohan's recommendation",
+    )
+    item = client.post(
+        "/api/items/voice",
+        files={"file": ("habits.wav", make_wav_bytes(), "audio/wav")},
+    ).json()
+    assert item["processing_status"] == "ready"
+
+    data = client.post(
+        "/api/ask",
+        json={"question": "What did Rohan recommend about Atomic Habits?"},
+    ).json()
+    assert data["confidence"] != "insufficient"
+    assert any(c["item_id"] == item["id"] for c in data["citations"])
+    assert "Atomic Habits" in data["answer"]
+
+
 def test_attention_board_buckets_and_briefing(client):
     client.post(
         "/api/items",

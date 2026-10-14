@@ -1251,7 +1251,8 @@ function renderAskResponse(data) {
   root.innerHTML = '';
   const confidence = document.createElement('div');
   confidence.className = 'confidence';
-  confidence.textContent = `Confidence: ${data.confidence} · ${data.answer_kind.replace('_', ' ')}`;
+  const modeLabel = data.mode ? ` · ${String(data.mode).replaceAll('_', ' ')}` : '';
+  confidence.textContent = `Confidence: ${data.confidence} · ${data.answer_kind.replace('_', ' ')}${modeLabel}`;
   const answer = document.createElement('div');
   answer.textContent = data.answer;
   root.append(confidence, answer);

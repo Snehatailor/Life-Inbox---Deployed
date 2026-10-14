@@ -319,3 +319,4 @@ class AskResponse(BaseModel):
     confidence: Literal["high", "medium", "insufficient"]
     citations: List[AskCitation]
     answer_kind: Literal["grounded_summary", "model_generated"]
+    mode: Literal["llm_grounded", "extractive_fallback"] = "extractive_fallback"
