@@ -901,6 +901,22 @@ def daily_briefing():
         ) from exc
 
 
+@app.get("/api/review/week")
+def weekly_review():
+    from app.review import build_weekly_review
+
+    try:
+        return build_weekly_review()
+    except OwnerRequiredError:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load weekly review")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load weekly review. Please try again.",
+        ) from exc
+
+
 @app.get("/api/calendar/status")
 def calendar_status():
     adapter = get_calendar_adapter()

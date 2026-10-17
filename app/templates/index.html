@@ -12,6 +12,7 @@
       <a class="brand" href="#capture">Life Inbox</a>
       <nav class="main-nav" aria-label="Life Inbox navigation">
         <a href="#capture">Inbox</a>
+        <a href="#week">My week</a>
         <a href="#organized">Organized</a>
         <a href="#tasks">Tasks</a>
         <a href="#calendar">Calendar</a>
@@ -82,6 +83,14 @@
     <div id="askOutput" class="panel ask-output">
       <span class="muted">Answers cite inbox items. If evidence is weak, Life Inbox says so instead of guessing.</span>
     </div>
+
+    <section id="week" aria-labelledby="weekHeading">
+      <h2 id="weekHeading">My week</h2>
+      <p class="sub">What you captured, finished and left untouched in the last 7 days.</p>
+      <button id="weeklyReviewButton" type="button" onclick="loadWeeklyReview()">Review my week</button>
+      <p id="weeklyReviewStatus" class="status muted" role="status" aria-live="polite"></p>
+      <div id="weeklyReview" class="panel" hidden></div>
+    </section>
 
     <h2 id="organized">Organized dashboard</h2>
     <p id="dashboardStatus" class="status muted" role="status" aria-live="polite"></p>

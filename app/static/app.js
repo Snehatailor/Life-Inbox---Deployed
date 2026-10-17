@@ -1570,6 +1570,65 @@ async function logoutSession() {
   }
 }
 
+const weeklyTypeLabels = {
+  text: 'notes', url: 'links', pdf: 'PDFs', image: 'images', voice: 'voice notes'
+};
+
+function renderWeeklyReview(review) {
+  const root = document.getElementById('weeklyReview');
+  const byType = Object.entries(review.captured.by_type)
+    .map(([kind, count]) => `${count} ${esc(weeklyTypeLabels[kind] || kind)}`)
+    .join(', ');
+  const listOrEmpty = (entries, emptyText) => entries.length
+    ? `<ul>${entries.join('')}</ul>`
+    : `<p class="muted">${emptyText}</p>`;
+  const summaryLabel = review.summary_kind === 'model_generated'
+    ? 'Written by AI from the numbers below'
+    : 'Written from the numbers below';
+
+  root.innerHTML = [
+    `<p class="week-summary">${esc(review.summary)}</p>`,
+    `<p class="muted week-summary-kind">${summaryLabel}</p>`,
+    '<div class="week-grid">',
+    `<div class="week-card"><h3>📥 Captured</h3><p class="week-number">${review.captured.total}</p>`,
+    `<p class="muted">${byType || 'Nothing new this week.'}</p></div>`,
+    `<div class="week-card"><h3>✅ Completed</h3><p class="week-number">${review.completed_tasks.length}</p>`,
+    listOrEmpty(
+      review.completed_tasks.slice(0, 5).map(task => `<li>${esc(task.text)}</li>`),
+      `No tasks finished yet. ${review.open_task_count} still open.`
+    ),
+    '</div>',
+    `<div class="week-card"><h3>🔥 On your mind</h3>`,
+    listOrEmpty(
+      review.top_topics.map(topic => `<li>${esc(topic.name)} (${topic.count})</li>`),
+      'Analyze your inbox to see topics.'
+    ),
+    '</div>',
+    `<div class="week-card"><h3>🕸️ Not organized yet</h3><p class="week-number">${review.untouched_count}</p>`,
+    listOrEmpty(
+      review.untouched_items.slice(0, 5).map(item => `<li>#${item.id} ${esc(item.text || item.item_type)}</li>`),
+      'Everything from this week is organized.'
+    ),
+    '</div>',
+    '</div>'
+  ].join('');
+  root.hidden = false;
+}
+
+async function loadWeeklyReview() {
+  setButtonBusy('weeklyReviewButton', true, 'Reviewing…', 'Review my week');
+  setStatus('weeklyReviewStatus', 'Looking back at your week…');
+  try {
+    const review = await fetchJson('/api/review/week', {}, 'Could not load your weekly review. Try again.');
+    renderWeeklyReview(review);
+    setStatus('weeklyReviewStatus', '');
+  } catch (error) {
+    setStatus('weeklyReviewStatus', error.message, true);
+  } finally {
+    setButtonBusy('weeklyReviewButton', false, 'Reviewing…', 'Review my week');
+  }
+}
+
 syncControlsFromUrl();
 loadAuthUser();
 loadNotes();

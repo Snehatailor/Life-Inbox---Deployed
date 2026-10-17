@@ -90,6 +90,13 @@ ul { padding-left: 22px; }
 .calendar-date { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
 .calendar-entry { display: block; margin: 3px 0; padding: 3px 5px; border-radius: 5px; background: #e6fcf5; color: #075f54; font-size: 11px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-entry.inbox-entry { background: #eef2ff; color: #3730a3; }
+.week-summary { font-size: 17px; margin: 0 0 4px; }
+.week-summary-kind { font-size: 12px; margin: 0 0 12px; }
+.week-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.week-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+.week-card h3 { margin: 0 0 6px; font-size: 15px; }
+.week-card ul { margin: 6px 0 0; padding-left: 18px; }
+.week-number { font-size: 28px; font-weight: 700; margin: 0; }
 @media (max-width: 640px) {
   body { margin: 20px 14px; }
   .search-toolbar input[type="search"] { min-width: 100%; }

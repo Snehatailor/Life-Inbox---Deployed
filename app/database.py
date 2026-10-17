@@ -1481,6 +1481,140 @@ def get_daily_briefing() -> dict:
     }
 
 
+WEEKLY_REVIEW_DAYS = 7
+
+
+def _parse_stored_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def get_weekly_review(now: Optional[datetime] = None) -> dict:
+    """Facts about the owner's last seven days, computed only from stored rows.
+
+    Counts come from the database, never from a model.  The plain-language
+    summary is added separately by ``app.review``.
+    """
+    from datetime import timedelta
+
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=WEEKLY_REVIEW_DAYS)
+    owner_id = require_owner_id()
+
+    def in_window(value: Optional[str]) -> bool:
+        stamp = _parse_stored_timestamp(value)
+        return stamp is not None and since <= stamp <= now
+
+    with SessionLocal() as session:
+        items = [
+            item
+            for item in session.scalars(
+                select(InboxItemRecord)
+                .where(InboxItemRecord.owner_user_id == owner_id)
+                .order_by(InboxItemRecord.id.asc())
+            )
+            if in_window(item.created_at)
+        ]
+        item_ids = [item.id for item in items]
+
+        captured_by_type: dict[str, int] = {}
+        for item in items:
+            captured_by_type[item.item_type] = captured_by_type.get(item.item_type, 0) + 1
+
+        tasks = session.scalars(
+            select(TaskRecord).where(TaskRecord.owner_user_id == owner_id)
+        ).all()
+        # There is no completed_at column; a completed task's updated_at is
+        # the closest stored fact for when it was finished.
+        completed = [
+            {"id": task.id, "text": task.text, "priority": task.priority}
+            for task in tasks
+            if task.status == TASK_COMPLETED and in_window(task.updated_at)
+        ]
+        open_task_count = sum(1 for task in tasks if task.status == TASK_OPEN)
+
+        insights = {}
+        linked_item_ids: set[int] = set()
+        if item_ids:
+            insights = {
+                insight.item_id: insight
+                for insight in session.scalars(
+                    _owned_insights(owner_id).where(
+                        ItemInsightRecord.item_id.in_(item_ids)
+                    )
+                )
+            }
+            linked_item_ids = set(
+                session.scalars(
+                    select(TaskSourceItemRecord.item_id)
+                    .join(TaskRecord, TaskRecord.id == TaskSourceItemRecord.task_id)
+                    .where(TaskRecord.owner_user_id == owner_id)
+                    .where(TaskSourceItemRecord.item_id.in_(item_ids))
+                )
+            )
+
+        owned_topics = {
+            topic.id: topic.name
+            for topic in session.scalars(
+                select(TopicRecord).where(TopicRecord.owner_user_id == owner_id)
+            )
+        }
+        topic_counts: dict[str, int] = {}
+        for insight in insights.values():
+            topic_id = (
+                insight.user_topic_id
+                if insight.user_topic_id in owned_topics
+                else insight.topic_id
+            )
+            name = owned_topics.get(topic_id)
+            if name:
+                topic_counts[name] = topic_counts.get(name, 0) + 1
+        top_topics = [
+            {"name": name, "count": count}
+            for name, count in sorted(
+                topic_counts.items(), key=lambda pair: (-pair[1], pair[0])
+            )[:3]
+        ]
+
+        # "Forgotten" = captured this week but never organized and never
+        # turned into a task.
+        untouched = [
+            {
+                "id": item.id,
+                "item_type": item.item_type,
+                "text": (
+                    item.title
+                    or item.raw_text
+                    or item.original_filename
+                    or item.source_url
+                    or ""
+                ).strip()[:160],
+                "created_at": item.created_at,
+            }
+            for item in items
+            if item.id not in insights and item.id not in linked_item_ids
+        ]
+
+    return {
+        "since": since.isoformat(),
+        "until": now.isoformat(),
+        "days": WEEKLY_REVIEW_DAYS,
+        "captured": {"total": len(items), "by_type": captured_by_type},
+        "completed_tasks": completed,
+        "open_task_count": open_task_count,
+        "top_topics": top_topics,
+        "untouched_items": untouched[:10],
+        "untouched_count": len(untouched),
+    }
+
+
 def save_calendar_receipt(
     *,
     draft_id: str,
