@@ -1,5 +1,7 @@
 let isSavingNote = false;
 let isAnalyzingInbox = false;
+let calendarTasks = [];
+let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 const pendingNoteActions = new Set();
 const pendingTaskActions = new Set();
 const itemFilterFields = {
@@ -21,6 +23,33 @@ function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   button.disabled = busy;
   button.textContent = busy ? busyLabel : idleLabel;
   button.setAttribute('aria-busy', String(busy));
+}
+
+function dateFromIso(isoDate) {
+  // Parse date-only values in local time; Date("YYYY-MM-DD") is UTC and can
+  // otherwise place a schedule on the previous day in the Americas.
+  return new Date(`${isoDate}T12:00:00`);
+}
+
+function relativeDueLabel(isoDate) {
+  if (!isoDate) return '';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = dateFromIso(isoDate);
+  target.setHours(0, 0, 0, 0);
+  const days = Math.round((target - today) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days > 1) return `In ${days} days`;
+  if (days === -1) return 'Yesterday';
+  return `${Math.abs(days)} days overdue`;
+}
+
+function refreshDynamicDates() {
+  document.querySelectorAll('[data-due-on]').forEach(element => {
+    const dueOn = element.dataset.dueOn;
+    element.textContent = dueOn ? `${relativeDueLabel(dueOn)} · ${dueOn}` : '';
+  });
 }
 
 function itemFilterParams() {
@@ -187,6 +216,7 @@ async function addNote() {
       'Your note was saved, but the list could not refresh. Reload to try again.'
     );
     await loadLatestAnalysis();
+    await loadCalendar();
   } catch {
     setStatus(
       'noteStatus',
@@ -754,6 +784,12 @@ function renderTask(task) {
     .map(itemId => `#${itemId}`)
     .join(', ');
   meta.textContent = `${task.status}${timingLabel} · Sources: ${sources}`;
+  if (task.due_on) {
+    const due = document.createElement('span');
+    due.dataset.dueOn = task.due_on;
+    due.textContent = ` · ${relativeDueLabel(task.due_on)} · ${task.due_on}`;
+    meta.append(due);
+  }
 
   const actions = document.createElement('div');
   actions.className = 'task-actions';
@@ -783,6 +819,7 @@ function renderTask(task) {
           setStatus('taskStatus', `Snoozed until ${iso}.`);
           await loadTasks();
           await loadAttention();
+          await loadCalendar();
         } catch {
           setStatus('taskStatus', 'Could not snooze task.', true);
         }
@@ -805,6 +842,7 @@ function renderTask(task) {
             await loadTasks();
             await loadDashboard();
             await loadAttention();
+            await loadCalendar();
           } catch {
             setStatus('taskStatus', 'Could not confirm timing.', true);
           }
@@ -854,6 +892,7 @@ async function transitionTask(taskId, action, actions) {
     setStatus('taskStatus', messages[action]);
     await loadTasks();
     await loadAttention();
+    await loadCalendar();
   } catch {
     setStatus(
       'taskStatus',
@@ -1005,6 +1044,7 @@ async function analyzeInbox() {
     await loadTasks();
     await loadTopics();
     await loadDashboard();
+    await loadCalendar();
     setStatus('analysisStatus', 'Analysis complete.');
   } catch {
     setStatus(
@@ -1410,6 +1450,73 @@ async function previewCalendarForTask(task) {
   }
 }
 
+function renderCalendar() {
+  const title = document.getElementById('calendarTitle');
+  const grid = document.getElementById('calendarGrid');
+  if (!title || !grid) return;
+  title.textContent = new Intl.DateTimeFormat(undefined, {
+    month: 'long', year: 'numeric'
+  }).format(calendarCursor);
+  grid.replaceChildren();
+  const year = calendarCursor.getFullYear();
+  const month = calendarCursor.getMonth();
+  const first = new Date(year, month, 1);
+  const start = new Date(year, month, 1 - first.getDay());
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    const cell = document.createElement('div');
+    cell.className = 'calendar-day';
+    if (day.getMonth() !== month) cell.classList.add('muted-day');
+    if (day.getTime() === today.getTime()) cell.classList.add('today');
+    const dateLabel = document.createElement('span');
+    dateLabel.className = 'calendar-date';
+    dateLabel.textContent = String(day.getDate());
+    cell.appendChild(dateLabel);
+    const isoDate = [day.getFullYear(), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0')].join('-');
+    for (const entry of calendarTasks.filter(task => task.due_on === isoDate)) {
+      const event = document.createElement('div');
+      event.className = `calendar-entry${entry.source === 'inbox' ? ' inbox-entry' : ''}`;
+      event.title = `${entry.text} — ${entry.timing_text || entry.due_on}`;
+      event.textContent = entry.text;
+      cell.appendChild(event);
+    }
+    grid.appendChild(cell);
+  }
+}
+
+async function loadCalendar() {
+  try {
+    calendarTasks = await fetchJson(
+      '/api/calendar/tasks',
+      undefined,
+      'Unable to load inbox calendar.'
+    );
+    renderCalendar();
+    setStatus(
+      'calendarScheduleStatus',
+      calendarTasks.length
+        ? `${calendarTasks.length} scheduled inbox item${calendarTasks.length === 1 ? '' : 's'}.`
+        : 'No dated inbox items yet.'
+    );
+  } catch {
+    setStatus('calendarScheduleStatus', 'Could not load inbox calendar.', true);
+  }
+}
+
+function moveCalendar(amount) {
+  calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + amount, 1);
+  renderCalendar();
+}
+
+function goToCalendarToday() {
+  const now = new Date();
+  calendarCursor = new Date(now.getFullYear(), now.getMonth(), 1);
+  renderCalendar();
+}
+
 async function loadAuthUser() {
   try {
     const user = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
@@ -1441,6 +1548,7 @@ async function devLogin(event) {
     await loadTasks();
     await loadAttention();
     await loadDashboard();
+    await loadCalendar();
   } catch {
     setStatus('authStatus', 'Sign-in failed (dev login may be disabled).', true);
   }
@@ -1456,6 +1564,7 @@ async function logoutSession() {
     await loadTasks();
     await loadAttention();
     await loadDashboard();
+    await loadCalendar();
   } catch {
     setStatus('authStatus', 'Sign-out failed.', true);
   }
@@ -1469,6 +1578,8 @@ loadTasks();
 loadTopics();
 loadDashboard();
 loadAttention();
+loadCalendar();
+window.setInterval(refreshDynamicDates, 60 * 1000);
 
 window.addEventListener('popstate', () => {
   syncControlsFromUrl();

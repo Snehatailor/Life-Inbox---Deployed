@@ -8,7 +8,18 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Life Inbox</h1>
+    <header class="app-header">
+      <a class="brand" href="#capture">Life Inbox</a>
+      <nav class="main-nav" aria-label="Life Inbox navigation">
+        <a href="#capture">Inbox</a>
+        <a href="#organized">Organized</a>
+        <a href="#tasks">Tasks</a>
+        <a href="#calendar">Calendar</a>
+        <a href="#sections">Sections</a>
+        <a href="#notes">Raw notes</a>
+      </nav>
+    </header>
+    <h1 id="capture">Life Inbox</h1>
     <p class="sub">Capture first. Organize the whole inbox with AI when you are ready.</p>
     <div class="auth-bar">
       <span id="authUser" class="muted">Checking session…</span>
@@ -72,13 +83,13 @@
       <span class="muted">Answers cite inbox items. If evidence is weak, Life Inbox says so instead of guessing.</span>
     </div>
 
-    <h2>Organized dashboard</h2>
+    <h2 id="organized">Organized dashboard</h2>
     <p id="dashboardStatus" class="status muted" role="status" aria-live="polite"></p>
     <div id="dashboard" class="dashboard">
       <span class="muted">Analyze your inbox to populate topics, priorities, and related items.</span>
     </div>
 
-    <h2>Topics / spaces</h2>
+    <h2 id="sections">Sections / spaces</h2>
     <form id="topicForm" class="topic-form" onsubmit="createTopic(event)">
       <label>
         New topic
@@ -107,7 +118,25 @@
       <span class="muted">Calendar previews require confirmation and never write to Google without owner approval.</span>
     </div>
 
-    <h2>Tasks</h2>
+    <section id="calendar" class="calendar-section" aria-labelledby="calendarHeading">
+      <div class="calendar-heading">
+        <div>
+          <h2 id="calendarHeading">Inbox calendar</h2>
+          <p class="sub">Dates from your inbox appear here immediately. Task dates replace their source note after organization.</p>
+        </div>
+        <div class="calendar-actions">
+          <button type="button" class="secondary" onclick="moveCalendar(-1)">Previous</button>
+          <button type="button" class="secondary" onclick="goToCalendarToday()">Today</button>
+          <button type="button" class="secondary" onclick="moveCalendar(1)">Next</button>
+        </div>
+      </div>
+      <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
+      <h3 id="calendarTitle"></h3>
+      <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+      <div id="calendarGrid" class="calendar-grid"></div>
+    </section>
+
+    <h2 id="tasks">Tasks</h2>
     <div class="task-toolbar">
       <label for="taskStatusFilter">Show</label>
       <select id="taskStatusFilter" onchange="changeTaskStatusFilter()">
@@ -119,7 +148,7 @@
     <p id="taskStatus" class="status muted" role="status" aria-live="polite"></p>
     <div id="tasks"></div>
 
-    <h2>Raw saved notes</h2>
+    <h2 id="notes">Raw saved notes</h2>
     <form id="itemSearchForm" class="search-toolbar" onsubmit="applyItemFilters(event)">
       <label>
         Search

@@ -915,6 +915,59 @@ def calendar_status():
     }
 
 
+@app.get("/api/calendar/tasks")
+def calendar_tasks():
+    """Return open scheduled tasks for the in-app calendar.
+
+    This is intentionally separate from the optional external calendar
+    adapter.  Capturing or organizing a dated task always updates the Life
+    Inbox calendar; exporting it remains an explicit preview/confirm action.
+    """
+    from app.attention.dates import parse_timing_phrase, timing_phrase_from_text
+
+    tasks = [
+        {
+            "id": f"task-{task['id']}",
+            "source": "task",
+            "task_id": task["id"],
+            "text": task["text"],
+            "timing_text": task.get("timing_text"),
+            "due_on": task["due_on"],
+            "priority": task["priority"],
+        }
+        for task in list_tasks_from_db(status_filter="open")
+        if task.get("due_on")
+    ]
+    scheduled_source_ids = {
+        item_id
+        for task in list_tasks_from_db(status_filter="open")
+        if task.get("due_on")
+        for item_id in task.get("source_item_ids", [])
+    }
+    # A dated note appears immediately after capture, even before the user
+    # chooses to run the full organizer.  Once it becomes a task, the task is
+    # the single calendar entry so dates never appear twice.
+    for item in list_items_from_db(limit=500):
+        if item["id"] in scheduled_source_ids:
+            continue
+        text = item.get("raw_text") or item.get("extracted_text") or ""
+        parsed = parse_timing_phrase(text)
+        if parsed.due_date is None:
+            continue
+        tasks.append(
+            {
+                "id": f"item-{item['id']}",
+                "source": "inbox",
+                "item_id": item["id"],
+                "text": (item.get("title") or text).strip()[:180],
+                "timing_text": timing_phrase_from_text(text),
+                "due_on": parsed.normalized_iso,
+                "priority": None,
+            }
+        )
+    return sorted(tasks, key=lambda entry: (entry["due_on"], entry["id"]))
+
+
 @app.post("/api/calendar/preview")
 def calendar_preview(payload: CalendarPreviewRequest):
     from datetime import date as date_cls
