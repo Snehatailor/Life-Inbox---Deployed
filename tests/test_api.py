@@ -68,7 +68,7 @@ def test_home_page_loads(client):
 @pytest.mark.parametrize(
     ("path", "content_type", "expected_content"),
     [
-        ("/static/styles.css", "text/css", ".wrap"),
+        ("/static/styles.css", "text/css", ".app-shell"),
         ("/static/app.js", "javascript", "async function addNote()"),
     ],
 )

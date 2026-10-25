@@ -1666,6 +1666,72 @@ async function loadWeeklyReview() {
   }
 }
 
+// Screens: one <section class="view" data-view="..."> is shown at a time,
+// chosen by the URL hash (#today, #inbox, ...). Query-string filters are
+// untouched, so search state and screens work together.
+const VIEW_NAMES = ['today', 'inbox', 'tasks', 'calendar', 'ask', 'sections'];
+const VIEW_TITLES = {
+  today: 'Today', inbox: 'Inbox', tasks: 'Tasks',
+  calendar: 'Calendar', ask: 'Ask', sections: 'Sections'
+};
+// Anchors from the old single-page layout keep working.
+const VIEW_ALIASES = { capture: 'today', week: 'today', organized: 'inbox', notes: 'inbox' };
+
+function viewFromHash() {
+  const hash = window.location.hash.replace(/^#/, '');
+  if (VIEW_NAMES.includes(hash)) return hash;
+  return VIEW_ALIASES[hash] || 'today';
+}
+
+function showView(name, { moveFocus = false } = {}) {
+  document.querySelectorAll('.view').forEach(view => {
+    view.hidden = view.dataset.view !== name;
+  });
+  document.querySelectorAll('[data-view-link]').forEach(link => {
+    if (link.dataset.viewLink === name) {
+      link.setAttribute('aria-current', 'page');
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  });
+  document.title = name === 'today' ? 'Life Inbox' : `${VIEW_TITLES[name]} · Life Inbox`;
+  window.scrollTo(0, 0);
+  if (moveFocus) {
+    // Tell screen-reader and keyboard users the screen changed.
+    const heading = document.querySelector(`#view-${name} h1`);
+    if (heading) {
+      heading.setAttribute('tabindex', '-1');
+      heading.focus({ preventScroll: true });
+    }
+  }
+}
+
+function routeFromHash(options) {
+  const name = viewFromHash();
+  const hash = window.location.hash.replace(/^#/, '');
+  if (hash && hash !== name) {
+    // Rewrite an old alias (#notes) to its screen (#inbox) without a new history entry.
+    const url = new URL(window.location.href);
+    url.hash = name;
+    window.history.replaceState(window.history.state, '', url);
+  }
+  showView(name, options);
+}
+
+function renderGreeting() {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('todayGreeting').textContent = greeting;
+  document.getElementById('todayDate').textContent = now.toLocaleDateString(undefined, {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+}
+
+window.addEventListener('hashchange', () => routeFromHash({ moveFocus: true }));
+routeFromHash();
+renderGreeting();
+
 syncControlsFromUrl();
 loadAuthUser();
 loadNotes();
@@ -1678,6 +1744,7 @@ loadCalendar();
 window.setInterval(refreshDynamicDates, 60 * 1000);
 
 window.addEventListener('popstate', () => {
+  routeFromHash();
   syncControlsFromUrl();
   loadNotes();
   loadTasks();
