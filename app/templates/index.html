@@ -21,6 +21,13 @@
         Life Inbox
       </a>
 
+      <form class="global-search" role="search" onsubmit="searchEverything(event)">
+        <label for="globalSearch" class="visually-hidden">Search everything</label>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="globalSearch" type="search" maxlength="200" placeholder="Search everything" autocomplete="off" />
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+
       <nav class="main-nav" aria-label="Life Inbox screens">
         <a href="#today" data-view-link="today">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
@@ -29,10 +36,12 @@
         <a href="#inbox" data-view-link="inbox">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
           <span>Inbox</span>
+          <span class="nav-count" data-count="inbox" hidden></span>
         </a>
         <a href="#tasks" data-view-link="tasks">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span>Tasks</span>
+          <span class="nav-count" data-count="tasks" hidden></span>
         </a>
         <a href="#calendar" data-view-link="calendar">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
@@ -47,6 +56,11 @@
           <span>Sections</span>
         </a>
       </nav>
+
+      <button type="button" class="ghost shortcuts-button" onclick="openShortcuts()">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+        Keyboard shortcuts
+      </button>
 
       <details class="account">
         <summary>
@@ -291,6 +305,26 @@
 
     </main>
   </div>
+
+  <dialog id="shortcutsDialog" class="shortcuts-dialog" aria-labelledby="shortcutsHeading">
+    <div class="shortcuts-header">
+      <h2 id="shortcutsHeading">Keyboard shortcuts</h2>
+      <button type="button" class="ghost" onclick="document.getElementById('shortcutsDialog').close()" aria-label="Close">×</button>
+    </div>
+    <dl class="shortcuts-list">
+      <div><dt><kbd>N</kbd></dt><dd>New note</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>Search everything</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>H</kbd></dt><dd>Go to Today</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>I</kbd></dt><dd>Go to Inbox</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>T</kbd></dt><dd>Go to Tasks</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>C</kbd></dt><dd>Go to Calendar</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>A</kbd></dt><dd>Go to Ask</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>S</kbd></dt><dd>Go to Sections</dd></div>
+      <div><dt><kbd>Ctrl</kbd> <kbd>Enter</kbd></dt><dd>Save capture</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Show this list</dd></div>
+      <div><dt><kbd>Esc</kbd></dt><dd>Close / leave a box</dd></div>
+    </dl>
+  </dialog>
 
   <!-- Short confirmations ("Task completed · Undo") appear here. -->
   <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>

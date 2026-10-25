@@ -143,6 +143,34 @@ ul { padding-left: 22px; }
 .main-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .main-nav svg { flex: none; }
 
+.global-search {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--muted);
+}
+.global-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.global-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 8px 0; font-size: 14px; box-shadow: none; }
+.global-search input:focus { box-shadow: none; }
+kbd {
+  font-family: inherit; font-size: 12px; font-weight: 600; color: var(--text-2); background: var(--surface);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px;
+}
+.nav-count { margin-left: auto; min-width: 22px; padding: 1px 7px; box-sizing: border-box; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 600; text-align: center; }
+.main-nav a[aria-current="page"] .nav-count { background: var(--surface); color: var(--accent-text); }
+.shortcuts-button { margin: 0; justify-content: flex-start; display: flex; align-items: center; gap: 10px; width: 100%; font-size: 13px; color: var(--muted); }
+.shortcuts-dialog {
+  width: min(420px, calc(100vw - 32px)); box-sizing: border-box; padding: 20px 22px; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); background: var(--surface); color: var(--text); box-shadow: 0 20px 48px rgba(16, 24, 40, 0.25);
+}
+.shortcuts-dialog::backdrop { background: rgba(16, 24, 40, 0.45); }
+.shortcuts-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.shortcuts-header h2 { margin: 0; font-size: 18px; }
+.shortcuts-header button { margin: 0; width: 36px; min-height: 36px; padding: 0; font-size: 20px; }
+.shortcuts-list { margin: 0; display: grid; gap: 2px; }
+.shortcuts-list div { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.shortcuts-list div:last-child { border-bottom: 0; }
+.shortcuts-list dt { display: flex; gap: 4px; }
+.shortcuts-list dd { margin: 0; color: var(--text-2); font-size: 14px; }
+
 .account { margin-top: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .account summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; font-size: 13px; color: var(--text-2); }
 .account summary::-webkit-details-marker { display: none; }
@@ -409,6 +437,10 @@ button:disabled, button:disabled:hover { cursor: not-allowed; opacity: 0.6; tran
   .main-nav a { flex-direction: column; justify-content: center; gap: 2px; min-height: 52px; padding: 0 2px; font-size: 11px; border-radius: 8px; }
   .main-nav a[aria-current="page"] { background: transparent; }
   .account { margin: 0; padding: 0; border: 0; position: relative; }
+  .global-search, .shortcuts-button { display: none; }
+  .main-nav a { position: relative; }
+  .nav-count { position: absolute; top: 4px; left: calc(50% + 6px); margin: 0; min-width: 18px; padding: 0 5px; font-size: 10px; line-height: 16px; background: var(--accent); color: var(--on-accent); }
+  .main-nav a[aria-current="page"] .nav-count { background: var(--accent); color: var(--on-accent); }
   .account-name { display: none; }
   .account[open] .auth-form, .account[open] .status {
     position: absolute; right: 0; width: min(300px, calc(100vw - 32px)); box-sizing: border-box;

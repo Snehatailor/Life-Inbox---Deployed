@@ -86,6 +86,34 @@ function showSkeleton(rootId, count = 3) {
   ).join('') + '<span class="visually-hidden">Loading…</span>';
 }
 
+// Small counts next to Inbox and Tasks in the menu. Refreshed (debounced)
+// whenever either list reloads, so saves, deletes and undos all update them.
+let navCountTimer = null;
+
+function updateNavCounts() {
+  clearTimeout(navCountTimer);
+  navCountTimer = setTimeout(async () => {
+    try {
+      const [items, openTasks] = await Promise.all([
+        fetchJson('/api/items?limit=500', undefined, 'Unable to count items.'),
+        fetchJson('/api/tasks?status=open', undefined, 'Unable to count tasks.')
+      ]);
+      setNavCount('inbox', items.length >= 500 ? '500+' : items.length, 'items');
+      setNavCount('tasks', openTasks.length, 'open tasks');
+    } catch {
+      // Counts are a nicety; the lists themselves report load errors.
+    }
+  }, 300);
+}
+
+function setNavCount(view, count, noun) {
+  const badge = document.querySelector(`[data-count="${view}"]`);
+  if (!badge) return;
+  badge.textContent = String(count);
+  badge.hidden = !count;
+  badge.setAttribute('aria-label', `${count} ${noun}`);
+}
+
 function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   const button = document.getElementById(buttonId);
   button.disabled = busy;
@@ -169,6 +197,10 @@ function hasItemFilters() {
   return itemFilterParams().size > 0;
 }
 
+// The query string last used for the lists; popstate compares against it so
+// switching screens (which also fires popstate) does not reload every list.
+let lastListQuery = window.location.search;
+
 function updateUrl(updates) {
   const url = new URL(window.location.href);
   for (const [name, value] of Object.entries(updates)) {
@@ -179,6 +211,7 @@ function updateUrl(updates) {
     }
   }
   window.history.pushState({}, '', url);
+  lastListQuery = url.search;
 }
 
 function syncControlsFromUrl() {
@@ -198,6 +231,8 @@ function syncControlsFromUrl() {
     }
     element.value = value;
   }
+  // The sidebar search mirrors the Inbox search words.
+  document.getElementById('globalSearch').value = params.get('q') || '';
 
   const taskStatus = params.get('task_status');
   document.getElementById('taskStatusFilter').value =
@@ -242,13 +277,38 @@ function applyItemFilters(event) {
     values[name] = params.get(name) || '';
   }
   updateUrl(values);
+  document.getElementById('globalSearch').value = values.q;
   loadNotes();
+}
+
+// The sidebar search box: open Inbox and search all items for the words,
+// with the other filters cleared so nothing is hidden by accident.
+function searchEverything(event) {
+  event.preventDefault();
+  const input = document.getElementById('globalSearch');
+  const query = input.value.trim();
+  for (const elementId of Object.values(itemFilterFields)) {
+    document.getElementById(elementId).value = '';
+  }
+  document.getElementById('itemSearch').value = query;
+  // One history entry for screen + words. Setting location.hash separately
+  // would fire popstate and reset the filters before the search runs.
+  const url = new URL(window.location.href);
+  for (const name of Object.keys(itemFilterFields)) url.searchParams.delete(name);
+  if (query) url.searchParams.set('q', query);
+  url.hash = 'inbox';
+  window.history.pushState({}, '', url);
+  lastListQuery = url.search;
+  showView('inbox');
+  loadNotes();
+  input.blur();
 }
 
 function clearItemFilters() {
   for (const elementId of Object.values(itemFilterFields)) {
     document.getElementById(elementId).value = '';
   }
+  document.getElementById('globalSearch').value = '';
   updateUrl(
     Object.fromEntries(
       Object.keys(itemFilterFields).map(name => [name, ''])
@@ -1182,12 +1242,14 @@ async function loadTasks() {
         dismissed: {title: 'No dismissed tasks', text: 'Tasks you dismiss will be listed here.'}
       };
       root.innerHTML = emptyStateHtml({icon: 'check', ...(emptyTasks[filter] || emptyTasks.open)});
+      updateNavCounts();
       return true;
     }
 
     for (const task of tasks) {
       root.appendChild(renderTask(task));
     }
+    updateNavCounts();
     return true;
   } catch {
     setStatus(
@@ -1409,6 +1471,7 @@ async function loadNotes(
         'searchStatus',
         filtered ? 'No results found.' : ''
       );
+      updateNavCounts();
       return true;
     }
 
@@ -1427,6 +1490,7 @@ async function loadNotes(
       updateLoadMoreButton(failureMessage);
     }
 
+    updateNavCounts();
     const loadedCount = itemPagination.loadedItems.length;
     setStatus(
       'searchStatus',
@@ -1919,6 +1983,18 @@ function viewFromHash() {
   return VIEW_ALIASES[hash] || 'today';
 }
 
+// Set by shortcuts that open a screen and want a specific field focused.
+let focusAfterRoute = null;
+
+function goToViewAndFocus(view, elementId) {
+  if (viewFromHash() === view) {
+    document.getElementById(elementId).focus();
+    return;
+  }
+  focusAfterRoute = elementId;
+  window.location.hash = view;
+}
+
 function showView(name, { moveFocus = false } = {}) {
   document.querySelectorAll('.view').forEach(view => {
     view.hidden = view.dataset.view !== name;
@@ -1932,7 +2008,14 @@ function showView(name, { moveFocus = false } = {}) {
   });
   document.title = name === 'today' ? 'Life Inbox' : `${VIEW_TITLES[name]} · Life Inbox`;
   window.scrollTo(0, 0);
-  if (moveFocus) {
+  if (!moveFocus) return;
+  // Chrome fires popstate (moveFocus false) before hashchange on a hash
+  // change, so a focus request is only used here, on the hashchange pass.
+  const requestedFocus = focusAfterRoute && document.getElementById(focusAfterRoute);
+  focusAfterRoute = null;
+  if (requestedFocus) {
+    requestedFocus.focus();
+  } else {
     // Tell screen-reader and keyboard users the screen changed.
     const heading = document.querySelector(`#view-${name} h1`);
     if (heading) {
@@ -1964,6 +2047,67 @@ function renderGreeting() {
   });
 }
 
+// Keyboard shortcuts. They never fire while typing in a field or with
+// Ctrl/Cmd/Alt held, so normal typing and browser shortcuts are untouched.
+const GO_TO_KEYS = { h: 'today', i: 'inbox', t: 'tasks', c: 'calendar', a: 'ask', s: 'sections' };
+let waitingForGoKey = false;
+let goKeyTimer = null;
+
+function openShortcuts() {
+  const dialog = document.getElementById('shortcutsDialog');
+  if (!dialog.open) dialog.showModal();
+}
+
+function isTypingTarget(element) {
+  if (!element) return false;
+  const tag = element.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element.isContentEditable;
+}
+
+function focusSearch() {
+  const global = document.getElementById('globalSearch');
+  if (global.offsetParent !== null) {
+    global.focus();
+    global.select();
+    return;
+  }
+  // Phones hide the sidebar search; use the Inbox one instead.
+  goToViewAndFocus('inbox', 'itemSearch');
+}
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && isTypingTarget(event.target) && event.target.type === 'search') {
+    event.target.blur();
+    return;
+  }
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (isTypingTarget(event.target) || document.getElementById('shortcutsDialog').open) return;
+
+  const key = event.key.toLowerCase();
+  if (waitingForGoKey) {
+    waitingForGoKey = false;
+    clearTimeout(goKeyTimer);
+    if (GO_TO_KEYS[key]) {
+      event.preventDefault();
+      window.location.hash = GO_TO_KEYS[key];
+    }
+    return;
+  }
+  if (key === 'g') {
+    waitingForGoKey = true;
+    goKeyTimer = setTimeout(() => { waitingForGoKey = false; }, 1200);
+  } else if (key === 'n') {
+    event.preventDefault();
+    goToViewAndFocus('today', 'noteText');
+  } else if (event.key === '/') {
+    event.preventDefault();
+    focusSearch();
+  } else if (event.key === '?') {
+    event.preventDefault();
+    openShortcuts();
+  }
+});
+
 window.addEventListener('hashchange', () => routeFromHash({ moveFocus: true }));
 routeFromHash();
 renderGreeting();
@@ -1984,6 +2128,8 @@ window.setInterval(refreshDynamicDates, 60 * 1000);
 
 window.addEventListener('popstate', () => {
   routeFromHash();
+  if (window.location.search === lastListQuery) return;
+  lastListQuery = window.location.search;
   syncControlsFromUrl();
   loadNotes();
   loadTasks();
