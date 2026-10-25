@@ -18,6 +18,74 @@ function setStatus(elementId, message, isError = false) {
   element.classList.toggle('error', isError);
 }
 
+// Toasts: short confirmations in the corner, optionally with one action
+// (usually Undo). Errors that need fixing stay inline next to their field.
+function showToast(message, {actionLabel, onAction, duration} = {}) {
+  const region = document.getElementById('toastRegion');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  const text = document.createElement('span');
+  text.className = 'toast-text';
+  text.textContent = message;
+  toast.appendChild(text);
+
+  let timer = null;
+  const dismiss = () => {
+    clearTimeout(timer);
+    toast.classList.add('toast-leaving');
+    setTimeout(() => toast.remove(), 200);
+  };
+
+  if (actionLabel && onAction) {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'toast-action';
+    action.textContent = actionLabel;
+    action.addEventListener('click', () => {
+      dismiss();
+      onAction();
+    });
+    toast.appendChild(action);
+  }
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss message');
+  close.textContent = '×';
+  close.addEventListener('click', dismiss);
+  toast.appendChild(close);
+
+  region.appendChild(toast);
+  // Keep at most three on screen.
+  while (region.children.length > 3) region.firstElementChild.remove();
+  timer = setTimeout(dismiss, duration || (actionLabel ? 6000 : 3500));
+  return {dismiss};
+}
+
+const EMPTY_ICONS = {
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  check: '<path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
+};
+
+// A friendly "nothing here" card. `action` is trusted, static HTML.
+function emptyStateHtml({icon, title, text, action = ''}) {
+  return `<div class="empty-state">
+    <span class="empty-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EMPTY_ICONS[icon]}</svg></span>
+    <strong>${title}</strong>
+    <p>${text}</p>
+    ${action}
+  </div>`;
+}
+
+function showSkeleton(rootId, count = 3) {
+  const root = document.getElementById(rootId);
+  root.innerHTML = Array.from({length: count}, () =>
+    '<div class="skeleton-card" aria-hidden="true"><span class="skeleton-line wide"></span><span class="skeleton-line"></span></div>'
+  ).join('') + '<span class="visually-hidden">Loading…</span>';
+}
+
 function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   const button = document.getElementById(buttonId);
   button.disabled = busy;
@@ -413,7 +481,12 @@ async function addNote() {
       }
     }
 
-    setStatus('noteStatus', messages.join(' '), hadError);
+    if (hadError) {
+      setStatus('noteStatus', messages.join(' '), true);
+    } else {
+      setStatus('noteStatus', '');
+      showToast(messages.join(' '));
+    }
     if (savedSomething) await refreshAfterCapture();
   } finally {
     isSavingNote = false;
@@ -440,7 +513,12 @@ async function saveRecording(file) {
   setStatus('noteStatus', 'Saving recorded voice note…');
   try {
     const result = captureResult('voice', await postCapture('voice', file));
-    setStatus('noteStatus', result.text, result.isError);
+    if (result.isError) {
+      setStatus('noteStatus', result.text, true);
+    } else {
+      setStatus('noteStatus', '');
+      showToast(result.text);
+    }
     await refreshAfterCapture();
   } catch {
     setStatus('noteStatus', 'We could not save that recording. Please try recording again.', true);
@@ -822,48 +900,86 @@ function showEditNote(note, root) {
   textarea.focus();
 }
 
-async function deleteExistingNote(note, root, editButton, deleteButton) {
-  if (pendingNoteActions.has(note.id)) return;
+// Delete with Undo: the card disappears at once, but the DELETE request is
+// only sent after DELETE_UNDO_MS. Undo in that window and nothing is ever
+// deleted. If the page is closed first, the request is still sent with
+// keepalive so the person's choice is honoured.
+const DELETE_UNDO_MS = 6000;
+const pendingDeletes = new Map();
 
-  const confirmed = window.confirm(
-    'Delete this item? This action cannot be undone.'
-  );
-  if (!confirmed) return;
+function deleteExistingNote(note, root) {
+  if (pendingNoteActions.has(note.id) || pendingDeletes.has(note.id)) return;
 
-  pendingNoteActions.add(note.id);
-  if (editButton) editButton.disabled = true;
-  if (deleteButton) {
-    deleteButton.disabled = true;
-    deleteButton.textContent = 'Deleting…';
+  root.classList.add('note-leaving');
+  setTimeout(() => {
+    if (pendingDeletes.has(note.id)) root.hidden = true;
+  }, 200);
+  const timer = setTimeout(() => commitDelete(note.id), DELETE_UNDO_MS);
+  pendingDeletes.set(note.id, {timer, root});
+  showToast('Item deleted.', {
+    actionLabel: 'Undo',
+    duration: DELETE_UNDO_MS,
+    onAction: () => undoDelete(note.id)
+  });
+}
+
+function undoDelete(noteId) {
+  const pending = pendingDeletes.get(noteId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingDeletes.delete(noteId);
+  if (pending.root.isConnected) {
+    pending.root.hidden = false;
+    pending.root.classList.remove('note-leaving');
+  } else {
+    // The list was reloaded in the meantime; render it again with the item.
+    loadNotes();
   }
-  setStatus('noteStatus', 'Deleting note…');
+  showToast('Item restored.');
+}
 
+async function commitDelete(noteId, {keepalive = false} = {}) {
+  const pending = pendingDeletes.get(noteId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingDeletes.delete(noteId);
+
+  if (keepalive) {
+    fetch(`/api/items/${noteId}`, {method: 'DELETE', keepalive: true});
+    return;
+  }
+
+  pendingNoteActions.add(noteId);
   try {
     await fetchJson(
-      `/api/items/${note.id}`,
+      `/api/items/${noteId}`,
       {method: 'DELETE'},
       'Unable to delete note.'
     );
-    LifeInboxPagination.afterLoadedNoteDeleted(itemPagination, note.id);
-    root.remove();
-    setStatus('noteStatus', 'Note deleted.');
+    LifeInboxPagination.afterLoadedNoteDeleted(itemPagination, noteId);
+    pending.root.remove();
     await loadLatestAnalysis();
     await loadTasks();
+    await loadDashboard();
+    await loadCalendar();
   } catch {
-    setStatus(
-      'noteStatus',
-      'We could not delete this note. It is still here—please try again.',
-      true
-    );
-    if (editButton) editButton.disabled = false;
-    if (deleteButton) {
-      deleteButton.disabled = false;
-      deleteButton.textContent = 'Delete';
+    if (pending.root.isConnected) {
+      pending.root.hidden = false;
+      pending.root.classList.remove('note-leaving');
+    } else {
+      loadNotes();
     }
+    showToast('We could not delete that item. It is back in your list—please try again.');
   } finally {
-    pendingNoteActions.delete(note.id);
+    pendingNoteActions.delete(noteId);
   }
 }
+
+window.addEventListener('pagehide', () => {
+  for (const noteId of [...pendingDeletes.keys()]) {
+    commitDelete(noteId, {keepalive: true});
+  }
+});
 
 function renderTask(task) {
   const root = document.createElement('div');
@@ -921,7 +1037,7 @@ function renderTask(task) {
             },
             'Unable to snooze task.'
           );
-          setStatus('taskStatus', `Snoozed until ${iso}.`);
+          showToast(`Snoozed: back ${relativeDueLabel(iso).toLowerCase()}.`);
           await loadTasks();
           await loadAttention();
           await loadCalendar();
@@ -943,7 +1059,7 @@ function renderTask(task) {
               },
               'Unable to confirm timing.'
             );
-            setStatus('taskStatus', 'Timing confirmed.');
+            showToast('Date confirmed.');
             await loadTasks();
             await loadDashboard();
             await loadAttention();
@@ -981,7 +1097,7 @@ async function transitionTask(taskId, action, actions) {
   buttons.forEach(button => {
     button.disabled = true;
   });
-  setStatus('taskStatus', 'Updating task…');
+  setStatus('taskStatus', '');
 
   try {
     await fetchJson(
@@ -989,12 +1105,24 @@ async function transitionTask(taskId, action, actions) {
       {method: 'POST'},
       'Unable to update task.'
     );
+    // Every transition moves the task out of the current filter, so let the
+    // card strike through and fade before the list reloads.
+    const card = actions.closest('.task');
+    if (card) {
+      card.classList.add(action === 'complete' ? 'task-completing' : 'task-leaving');
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
     const messages = {
       complete: 'Task completed.',
       dismiss: 'Task dismissed.',
       reopen: 'Task reopened.'
     };
-    setStatus('taskStatus', messages[action]);
+    showToast(
+      messages[action],
+      action === 'reopen'
+        ? {}
+        : {actionLabel: 'Undo', onAction: () => undoTaskTransition(taskId, action)}
+    );
     await loadTasks();
     await loadAttention();
     await loadCalendar();
@@ -1012,6 +1140,26 @@ async function transitionTask(taskId, action, actions) {
   }
 }
 
+async function undoTaskTransition(taskId, action) {
+  try {
+    await fetchJson(
+      `/api/tasks/${taskId}/reopen`,
+      {method: 'POST'},
+      'Unable to undo.'
+    );
+    showToast(action === 'complete' ? 'Task is open again.' : 'Task restored.');
+    await loadTasks();
+    await loadAttention();
+    await loadCalendar();
+  } catch {
+    setStatus(
+      'taskStatus',
+      `We could not undo that. Show ${action === 'complete' ? 'Completed' : 'Dismissed'} tasks and click Reopen.`,
+      true
+    );
+  }
+}
+
 async function loadTasks() {
   const filter = document.getElementById('taskStatusFilter').value;
   try {
@@ -1024,7 +1172,16 @@ async function loadTasks() {
     root.innerHTML = '';
 
     if (!tasks.length) {
-      root.innerHTML = '<div class="panel muted">No tasks in this view.</div>';
+      const emptyTasks = {
+        open: {
+          title: 'No open tasks',
+          text: 'Analyze your inbox to turn notes like “renew passport this week” into tasks.',
+          action: '<a class="button-link" href="#inbox">Go to Inbox</a>'
+        },
+        completed: {title: 'Nothing completed yet', text: 'Tasks you complete will be listed here.'},
+        dismissed: {title: 'No dismissed tasks', text: 'Tasks you dismiss will be listed here.'}
+      };
+      root.innerHTML = emptyStateHtml({icon: 'check', ...(emptyTasks[filter] || emptyTasks.open)});
       return true;
     }
 
@@ -1236,8 +1393,18 @@ async function loadNotes(
 
     if (!append && !notes.length) {
       root.innerHTML = filtered
-        ? '<div class="panel muted">No inbox items match these filters.</div>'
-        : '<div class="panel muted">No saved notes yet. Capture a thought above to get started.</div>';
+        ? emptyStateHtml({
+          icon: 'search',
+          title: 'No matches',
+          text: 'Try different words, or clear the filters to see everything.',
+          action: '<button type="button" class="secondary" onclick="clearItemFilters()">Clear filters</button>'
+        })
+        : emptyStateHtml({
+          icon: 'inbox',
+          title: 'Your inbox is empty',
+          text: 'Save a thought, link or file on Today and it will show up here.',
+          action: '<a class="button-link" href="#today">Capture something</a>'
+        });
       setStatus(
         'searchStatus',
         filtered ? 'No results found.' : ''
@@ -1252,6 +1419,7 @@ async function loadNotes(
     );
 
     for (const note of textNotes) {
+      if (pendingDeletes.has(note.id)) continue;
       root.appendChild(renderNote(note));
     }
 
@@ -1800,6 +1968,8 @@ window.addEventListener('hashchange', () => routeFromHash({ moveFocus: true }));
 routeFromHash();
 renderGreeting();
 setUpCaptureBox();
+showSkeleton('notesList');
+showSkeleton('tasksList', 2);
 
 syncControlsFromUrl();
 loadAuthUser();
