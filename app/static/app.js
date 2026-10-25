@@ -25,6 +25,36 @@ function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   button.setAttribute('aria-busy', String(busy));
 }
 
+function friendlyTimestamp(isoTimestamp) {
+  // "Today, 10:50 PM", "Yesterday, 6:42 PM", "Sat 24 Oct, 6:42 PM",
+  // or "24 Oct 2025, 6:42 PM" for another year. Unparseable values are
+  // shown as stored so nothing silently disappears.
+  const stamp = new Date(isoTimestamp);
+  if (!isoTimestamp || Number.isNaN(stamp.getTime())) return isoTimestamp || '';
+  const time = stamp.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(stamp);
+  day.setHours(0, 0, 0, 0);
+  const daysAgo = Math.round((today - day) / 86400000);
+  if (daysAgo === 0) return `Today, ${time}`;
+  if (daysAgo === 1) return `Yesterday, ${time}`;
+  const sameYear = stamp.getFullYear() === today.getFullYear();
+  const date = stamp.toLocaleDateString(undefined, sameYear
+    ? { weekday: 'short', day: 'numeric', month: 'short' }
+    : { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${date}, ${time}`;
+}
+
+function timestampElement(isoTimestamp) {
+  const element = document.createElement('time');
+  element.dateTime = isoTimestamp || '';
+  element.textContent = friendlyTimestamp(isoTimestamp);
+  const stamp = new Date(isoTimestamp);
+  if (!Number.isNaN(stamp.getTime())) element.title = stamp.toLocaleString();
+  return element;
+}
+
 function dateFromIso(isoDate) {
   // Parse date-only values in local time; Date("YYYY-MM-DD") is UTC and can
   // otherwise place a schedule on the previous day in the Americas.
@@ -514,7 +544,8 @@ function renderNote(note) {
   time.className = 'time';
   const status = note.processing_status ? ` · ${note.processing_status}` : '';
   const error = note.error_message ? ` · ${note.error_message}` : '';
-  time.textContent = `#${note.id} · ${note.item_type}${status}${error} · ${note.created_at}`;
+  time.textContent = `#${note.id} · ${note.item_type}${status}${error} · `;
+  time.append(timestampElement(note.created_at));
 
   const actions = document.createElement('div');
   actions.className = 'note-actions';
@@ -915,7 +946,7 @@ async function loadTasks() {
       undefined,
       'Unable to load tasks.'
     );
-    const root = document.getElementById('tasks');
+    const root = document.getElementById('tasksList');
     root.innerHTML = '';
 
     if (!tasks.length) {
@@ -940,7 +971,7 @@ async function loadTasks() {
 function renderAnalysis(data) {
   const root = document.getElementById('aiOutput');
   const generatedAt = data.generated_at
-    ? new Date(data.generated_at).toLocaleString()
+    ? friendlyTimestamp(data.generated_at)
     : null;
   const staleBanner = data.is_stale
     ? `<div class="banner warn" role="status">Analysis is stale — inbox items changed since this run. Re-analyze to refresh.</div>`
@@ -1004,7 +1035,7 @@ async function loadLatestAnalysis() {
 
     populateCategoryFilter(data);
     renderAnalysis(data);
-    const generatedAt = new Date(data.generated_at).toLocaleString();
+    const generatedAt = friendlyTimestamp(data.generated_at);
     setStatus(
       'analysisStatus',
       data.is_stale
@@ -1072,7 +1103,7 @@ function updateLoadMoreButton(failureMessage) {
   if (existingMore) existingMore.remove();
   if (!itemPagination.hasMore) return;
 
-  const root = document.getElementById('notes');
+  const root = document.getElementById('notesList');
   const more = document.createElement('button');
   more.id = 'loadMoreItems';
   more.type = 'button';
@@ -1121,7 +1152,7 @@ async function loadNotes(
       undefined,
       'Unable to load notes.'
     );
-    const root = document.getElementById('notes');
+    const root = document.getElementById('notesList');
     if (!append) {
       root.innerHTML = '';
     } else {
