@@ -25,6 +25,12 @@ function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   button.setAttribute('aria-busy', String(busy));
 }
 
+function priorityClass(priority) {
+  // Only the three known levels get a color class; anything else stays a plain pill.
+  const level = String(priority || '').toLowerCase();
+  return ['high', 'medium', 'low'].includes(level) ? `pill priority-${level}` : 'pill';
+}
+
 function friendlyTimestamp(isoTimestamp) {
   // "Today, 10:50 PM", "Yesterday, 6:42 PM", "Sat 24 Oct, 6:42 PM",
   // or "24 Oct 2025, 6:42 PM" for another year. Unparseable values are
@@ -800,7 +806,7 @@ function renderTask(task) {
   text.textContent = task.text;
 
   const priority = document.createElement('span');
-  priority.className = 'pill';
+  priority.className = priorityClass(task.priority);
   priority.textContent = task.priority;
 
   const content = document.createElement('div');
@@ -982,14 +988,14 @@ function renderAnalysis(data) {
       <h3>${esc(bucket.name)}</h3>
       <ul>
         ${(bucket.notes || []).map(n =>
-          `<li>${esc(n.title)} <span class="pill">${esc(n.priority)}</span></li>`
+          `<li>${esc(n.title)} <span class="${priorityClass(n.priority)}">${esc(n.priority)}</span></li>`
         ).join('')}
       </ul>
     </div>
   `).join('');
 
   const todoHtml = (data.todos || []).map(t =>
-    `<li><strong>${esc(t.task)}</strong> <span class="pill">${esc(t.priority)}</span>${t.when ? ` · ${esc(t.when)}` : ''}</li>`
+    `<li><strong>${esc(t.task)}</strong> <span class="${priorityClass(t.priority)}">${esc(t.priority)}</span>${t.when ? ` · ${esc(t.when)}` : ''}</li>`
   ).join('');
 
   const pv = data.priority_view || {High: [], Medium: [], Low: []};
@@ -1297,7 +1303,7 @@ async function loadDashboard() {
           `<li>${esc(item.effective_title || item.raw_text || ('#' + item.id))}${item.rationale ? `<div class="why">Why: ${esc(item.rationale)}</div>` : ''}</li>`
         ))}
         ${section('Open Tasks', listOrEmpty(data.open_tasks, task =>
-          `<li><strong>${esc(task.text)}</strong> <span class="pill">${esc(task.priority)}</span>${task.timing_text ? ` · ${esc(task.timing_text)}${task.timing_confirmed ? ' (confirmed)' : ' (AI suggested)'}` : ''}</li>`
+          `<li><strong>${esc(task.text)}</strong> <span class="${priorityClass(task.priority)}">${esc(task.priority)}</span>${task.timing_text ? ` · ${esc(task.timing_text)}${task.timing_confirmed ? ' (confirmed)' : ' (AI suggested)'}` : ''}</li>`
         ))}
         ${section('Recently Captured', listOrEmpty(data.recently_captured, item =>
           `<li>#${item.id} · ${esc((item.raw_text || '').slice(0, 80))}</li>`

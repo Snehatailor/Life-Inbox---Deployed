@@ -3,7 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Life Inbox</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -30,7 +34,7 @@
           <input id="devLoginEmail" type="email" maxlength="200" placeholder="you@example.com" required />
         </label>
         <button type="submit" class="secondary">Sign in</button>
-        <button type="button" class="secondary" onclick="logoutSession()">Sign out</button>
+        <button type="button" class="ghost" onclick="logoutSession()">Sign out</button>
       </form>
       <p id="authStatus" class="status muted" role="status" aria-live="polite"></p>
     </div>
@@ -200,7 +204,7 @@
       </label>
       <div class="search-actions">
         <button type="submit">Search</button>
-        <button type="button" class="secondary" onclick="clearItemFilters()">Clear</button>
+        <button type="button" class="ghost" onclick="clearItemFilters()">Clear</button>
       </div>
     </form>
     <p id="searchStatus" class="status muted" role="status" aria-live="polite"></p>
