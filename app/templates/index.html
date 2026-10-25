@@ -80,39 +80,29 @@
           </div>
         </header>
 
-        <div class="card capture-card">
-          <label for="noteText" class="visually-hidden">Capture a note</label>
-          <textarea id="noteText" placeholder="What's on your mind? e.g. Met Rohan yesterday. He recommended Atomic Habits. Need to order it this weekend."></textarea>
+        <div id="captureCard" class="card capture-card">
+          <label for="noteText" class="visually-hidden">Capture a note, link or file</label>
+          <textarea id="noteText" aria-describedby="captureHint" placeholder="What's on your mind? Type a note, paste a link, or drop a PDF, image or audio file here."></textarea>
+          <div id="captureAttachment" class="capture-attachment" hidden></div>
+          <p id="captureHint" class="capture-hint" hidden></p>
           <div class="capture-actions">
-            <button id="addNoteButton" type="button" onclick="addNote()">Add Note</button>
+            <div class="capture-tools">
+              <input id="captureFile" type="file" class="visually-hidden" tabindex="-1" aria-hidden="true"
+                accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,audio/*,video/webm,.webm,.wav,.mp3,.m4a,.ogg"
+                onchange="attachCaptureFile(this.files[0])" />
+              <button type="button" class="icon-button" onclick="document.getElementById('captureFile').click()" aria-label="Attach a PDF, image or audio file" title="Attach a PDF, image or audio file">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <button id="recordVoiceButton" type="button" class="icon-button" onclick="toggleVoiceRecording()" aria-pressed="false" aria-label="Record a voice note" title="Record a voice note">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></svg>
+              </button>
+              <span id="voiceStatus" class="capture-voice-status" role="status" aria-live="polite"></span>
+            </div>
+            <div class="capture-submit">
+              <span id="captureShortcut" class="capture-shortcut" aria-hidden="true">Ctrl + Enter</span>
+              <button id="addNoteButton" type="button" onclick="addNote()">Save</button>
+            </div>
           </div>
-          <details class="capture-more">
-            <summary>Save a link, PDF, image or voice note</summary>
-            <div class="url-capture">
-              <label for="urlText">Capture URL</label>
-              <input id="urlText" type="url" maxlength="2000" placeholder="https://example.com/article" />
-              <button id="addUrlButton" type="button" class="secondary" onclick="addUrl()">Save URL</button>
-            </div>
-            <div class="pdf-capture">
-              <label for="pdfFile">Upload PDF</label>
-              <input id="pdfFile" type="file" accept="application/pdf,.pdf" />
-              <button id="addPdfButton" type="button" class="secondary" onclick="addPdf()">Upload PDF</button>
-            </div>
-            <div class="image-capture">
-              <label for="imageFile">Upload image / screenshot</label>
-              <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" />
-              <button id="addImageButton" type="button" class="secondary" onclick="addImage()">Upload image</button>
-            </div>
-            <div class="voice-capture">
-              <label for="voiceFile">Voice note</label>
-              <div class="voice-actions">
-                <button id="recordVoiceButton" type="button" class="secondary" onclick="toggleVoiceRecording()">Record</button>
-                <input id="voiceFile" type="file" accept="audio/*,video/webm,.webm,.wav,.mp3,.m4a,.ogg" />
-                <button id="addVoiceButton" type="button" class="secondary" onclick="addVoice()">Upload audio</button>
-              </div>
-              <p id="voiceStatus" class="status muted" role="status" aria-live="polite"></p>
-            </div>
-          </details>
           <p id="noteStatus" class="status muted" role="status" aria-live="polite"></p>
         </div>
 

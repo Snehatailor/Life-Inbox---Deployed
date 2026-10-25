@@ -218,122 +218,207 @@ async function fetchJson(url, options, friendlyError) {
   }
 }
 
+// ------------------------------------------------------------------
+// Capture: one box for notes, links, PDFs, images and voice notes.
+// The text and any attached file decide which existing endpoint is used.
+// ------------------------------------------------------------------
+const CAPTURE_LABELS = {
+  note: 'Note', url: 'Link', pdf: 'PDF', image: 'Image', voice: 'Voice note'
+};
+const CAPTURE_PROGRESS = {
+  note: 'Saving your note…',
+  url: 'Saving the link and fetching the page text…',
+  pdf: 'Saving PDF and extracting text…',
+  image: 'Saving image and reading any text in it…',
+  voice: 'Uploading voice note…'
+};
+const FILE_KIND_NAMES = { pdf: 'PDF', image: 'image', voice: 'audio file' };
+
+let attachedFile = null;
+
+function looksLikeUrl(text) {
+  // Only a bare link becomes a URL capture; a sentence containing a link
+  // stays a note so none of the person's words are dropped.
+  return /^https?:\/\/\S+$/i.test(text);
+}
+
+function fileKind(file) {
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+  if (type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/.test(name)) return 'image';
+  if (type.startsWith('audio/') || type === 'video/webm' || /\.(webm|wav|mp3|m4a|ogg)$/.test(name)) return 'voice';
+  return null;
+}
+
+function updateCaptureHint() {
+  const hint = document.getElementById('captureHint');
+  const text = document.getElementById('noteText').value.trim();
+  let message = '';
+  if (attachedFile) {
+    message = `Will save the ${FILE_KIND_NAMES[fileKind(attachedFile)]}`;
+    if (text) message += ' and your text as a separate note';
+  } else if (looksLikeUrl(text)) {
+    message = 'Looks like a link: Life Inbox will save it and fetch the page text';
+  }
+  hint.textContent = message;
+  hint.hidden = !message;
+}
+
+function renderAttachedFile() {
+  const chip = document.getElementById('captureAttachment');
+  if (!attachedFile) {
+    chip.hidden = true;
+    chip.replaceChildren();
+    return;
+  }
+  const name = document.createElement('span');
+  name.className = 'attachment-name';
+  name.textContent = `${CAPTURE_LABELS[fileKind(attachedFile)]} · ${attachedFile.name}`;
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'ghost attachment-remove';
+  remove.setAttribute('aria-label', `Remove ${attachedFile.name}`);
+  remove.textContent = '×';
+  remove.addEventListener('click', clearAttachedFile);
+  chip.replaceChildren(name, remove);
+  chip.hidden = false;
+}
+
+function attachCaptureFile(file) {
+  if (!file) return;
+  if (!fileKind(file)) {
+    setStatus(
+      'noteStatus',
+      `“${file.name}” can't be saved here. Life Inbox accepts PDFs, images and audio files.`,
+      true
+    );
+    document.getElementById('captureFile').value = '';
+    return;
+  }
+  attachedFile = file;
+  setStatus('noteStatus', '');
+  renderAttachedFile();
+  updateCaptureHint();
+}
+
+function clearAttachedFile() {
+  attachedFile = null;
+  document.getElementById('captureFile').value = '';
+  renderAttachedFile();
+  updateCaptureHint();
+}
+
+async function postCapture(kind, payload) {
+  if (kind === 'note' || kind === 'url') {
+    return fetchJson(
+      kind === 'note' ? '/api/items' : '/api/items/url',
+      {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(kind === 'note' ? {raw_text: payload} : {url: payload})
+      },
+      `Unable to save ${kind}.`
+    );
+  }
+  const formData = new FormData();
+  formData.append('file', payload, payload.name || 'voice-note.webm');
+  return fetchJson(`/api/items/${kind}`, {method: 'POST', body: formData}, `Unable to upload ${kind}.`);
+}
+
+function captureResult(kind, item) {
+  if (item && item.processing_status && item.processing_status !== 'ready') {
+    return {
+      text: `${CAPTURE_LABELS[kind]} saved, but processing failed: ${(item.error_message || 'unknown error').replace(/\.+$/, '')}.`,
+      isError: true
+    };
+  }
+  if (kind === 'voice') {
+    return {
+      text: item && item.extracted_text
+        ? 'Voice note saved and transcribed.'
+        : 'Voice note saved. Add or edit the transcript if needed.',
+      isError: false
+    };
+  }
+  const done = {
+    note: 'Note saved.',
+    url: 'Link saved and page text fetched.',
+    pdf: 'PDF saved and processed.',
+    image: 'Image saved and processed.'
+  };
+  return {text: done[kind], isError: false};
+}
+
+async function refreshAfterCapture() {
+  await loadNotes('Saved, but the list could not refresh. Reload to try again.');
+  await loadLatestAnalysis();
+  await loadDashboard();
+  await loadCalendar();
+}
+
+// The Save button and Ctrl/Cmd+Enter. Saves the attached file (if any),
+// then the text as a link or a note. Nothing typed or attached is cleared
+// unless it was saved.
 async function addNote() {
   if (isSavingNote) return;
 
   const textarea = document.getElementById('noteText');
   const text = textarea.value.trim();
-  if (!text) {
-    setStatus('noteStatus', 'Write a note before saving.', true);
+  const file = attachedFile;
+  if (!text && !file) {
+    setStatus('noteStatus', 'Write a note, paste a link, or attach a file before saving.', true);
     textarea.focus();
     return;
   }
 
   isSavingNote = true;
-  setButtonBusy('addNoteButton', true, 'Saving…', 'Add Note');
-  setStatus('noteStatus', 'Saving your note…');
+  setButtonBusy('addNoteButton', true, 'Saving…', 'Save');
+  const messages = [];
+  let hadError = false;
+  let savedSomething = false;
 
   try {
-    await fetchJson(
-      '/api/items',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({raw_text: text})
-      },
-      'Unable to save note.'
-    );
-
-    if (textarea.value.trim() === text) {
-      textarea.value = '';
+    if (file) {
+      const kind = fileKind(file);
+      setStatus('noteStatus', CAPTURE_PROGRESS[kind]);
+      try {
+        const result = captureResult(kind, await postCapture(kind, file));
+        messages.push(result.text);
+        hadError = hadError || result.isError;
+        savedSomething = true;
+        if (attachedFile === file) clearAttachedFile();
+      } catch {
+        messages.push(`We could not upload that ${FILE_KIND_NAMES[kind]}. It is still attached—please try again.`);
+        hadError = true;
+      }
     }
-    setStatus('noteStatus', 'Note saved.');
-    await loadNotes(
-      'Your note was saved, but the list could not refresh. Reload to try again.'
-    );
-    await loadLatestAnalysis();
-    await loadCalendar();
-  } catch {
-    setStatus(
-      'noteStatus',
-      'We could not save your note. Your text is still here—please try again.',
-      true
-    );
+
+    if (text && (savedSomething || !file)) {
+      const kind = !file && looksLikeUrl(text) ? 'url' : 'note';
+      setStatus('noteStatus', CAPTURE_PROGRESS[kind]);
+      try {
+        const result = captureResult(kind, await postCapture(kind, text));
+        messages.push(result.text);
+        hadError = hadError || result.isError;
+        savedSomething = true;
+        if (textarea.value.trim() === text) textarea.value = '';
+      } catch {
+        messages.push(
+          kind === 'url'
+            ? 'We could not save that link. It is still in the box—please try again.'
+            : 'We could not save your note. Your text is still here—please try again.'
+        );
+        hadError = true;
+      }
+    }
+
+    setStatus('noteStatus', messages.join(' '), hadError);
+    if (savedSomething) await refreshAfterCapture();
   } finally {
     isSavingNote = false;
-    setButtonBusy('addNoteButton', false, 'Saving…', 'Add Note');
-  }
-}
-
-async function addPdf() {
-  const input = document.getElementById('pdfFile');
-  const file = input.files && input.files[0];
-  if (!file) {
-    setStatus('noteStatus', 'Choose a PDF file before uploading.', true);
-    input.focus();
-    return;
-  }
-  setButtonBusy('addPdfButton', true, 'Uploading…', 'Upload PDF');
-  setStatus('noteStatus', 'Saving PDF and extracting text…');
-  const formData = new FormData();
-  formData.append('file', file);
-  try {
-    const item = await fetchJson(
-      '/api/items/pdf',
-      {method: 'POST', body: formData},
-      'Unable to upload PDF.'
-    );
-    input.value = '';
-    setStatus(
-      'noteStatus',
-      item.processing_status === 'ready'
-        ? 'PDF saved and processed.'
-        : `PDF saved but processing failed: ${item.error_message || 'unknown error'}`,
-      item.processing_status !== 'ready'
-    );
-    await loadNotes();
-    await loadLatestAnalysis();
-    await loadDashboard();
-  } catch {
-    setStatus('noteStatus', 'We could not upload that PDF.', true);
-  } finally {
-    setButtonBusy('addPdfButton', false, 'Uploading…', 'Upload PDF');
-  }
-}
-
-async function addImage() {
-  const input = document.getElementById('imageFile');
-  const file = input.files && input.files[0];
-  if (!file) {
-    setStatus('noteStatus', 'Choose an image before uploading.', true);
-    input.focus();
-    return;
-  }
-  setButtonBusy('addImageButton', true, 'Uploading…', 'Upload image');
-  setStatus('noteStatus', 'Saving image and running OCR…');
-  const formData = new FormData();
-  formData.append('file', file);
-  try {
-    const item = await fetchJson(
-      '/api/items/image',
-      {method: 'POST', body: formData},
-      'Unable to upload image.'
-    );
-    input.value = '';
-    setStatus(
-      'noteStatus',
-      item.processing_status === 'ready'
-        ? 'Image saved and processed.'
-        : `Image saved but processing failed: ${item.error_message || 'unknown error'}`,
-      item.processing_status !== 'ready'
-    );
-    await loadNotes();
-    await loadLatestAnalysis();
-    await loadDashboard();
-  } catch {
-    setStatus('noteStatus', 'We could not upload that image.', true);
-  } finally {
-    setButtonBusy('addImageButton', false, 'Uploading…', 'Upload image');
+    setButtonBusy('addNoteButton', false, 'Saving…', 'Save');
+    updateCaptureHint();
   }
 }
 
@@ -341,59 +426,37 @@ let voiceRecorder = null;
 let voiceChunks = [];
 let voiceStream = null;
 
-async function addVoice() {
-  const input = document.getElementById('voiceFile');
-  const file = input.files && input.files[0];
-  if (!file) {
-    setStatus('noteStatus', 'Choose an audio file or record one first.', true);
-    input.focus();
-    return;
-  }
-  await uploadVoiceFile(file, 'Uploading voice note…');
-  input.value = '';
+function setRecordingUi(recording) {
+  const button = document.getElementById('recordVoiceButton');
+  const label = recording ? 'Stop recording and save' : 'Record a voice note';
+  button.classList.toggle('recording', recording);
+  button.setAttribute('aria-pressed', String(recording));
+  button.setAttribute('aria-label', label);
+  button.title = label;
 }
 
-async function uploadVoiceFile(file, statusMessage) {
-  setButtonBusy('addVoiceButton', true, 'Uploading…', 'Upload audio');
-  setStatus('noteStatus', statusMessage);
-  const formData = new FormData();
-  formData.append('file', file, file.name || 'voice-note.webm');
+async function saveRecording(file) {
+  setStatus('voiceStatus', '');
+  setStatus('noteStatus', 'Saving recorded voice note…');
   try {
-    const item = await fetchJson(
-      '/api/items/voice',
-      {method: 'POST', body: formData},
-      'Unable to upload voice note.'
-    );
-    setStatus(
-      'noteStatus',
-      item.processing_status === 'ready'
-        ? (item.extracted_text
-          ? 'Voice note saved and transcribed.'
-          : 'Voice note saved. Add or edit the transcript if needed.')
-        : `Voice note saved but processing failed: ${item.error_message || 'unknown error'}`,
-      item.processing_status !== 'ready'
-    );
-    setStatus('voiceStatus', '');
-    await loadNotes();
-    await loadLatestAnalysis();
-    await loadDashboard();
+    const result = captureResult('voice', await postCapture('voice', file));
+    setStatus('noteStatus', result.text, result.isError);
+    await refreshAfterCapture();
   } catch {
-    setStatus('noteStatus', 'We could not upload that voice note.', true);
-  } finally {
-    setButtonBusy('addVoiceButton', false, 'Uploading…', 'Upload audio');
+    setStatus('noteStatus', 'We could not save that recording. Please try recording again.', true);
   }
 }
 
 async function toggleVoiceRecording() {
   if (voiceRecorder && voiceRecorder.state === 'recording') {
     voiceRecorder.stop();
-    setButtonBusy('recordVoiceButton', false, 'Recording…', 'Record');
-    setStatus('voiceStatus', 'Processing recording…');
+    setRecordingUi(false);
+    setStatus('voiceStatus', 'Processing…');
     return;
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setStatus('voiceStatus', 'Browser recording is not available here. Upload an audio file instead.', true);
+    setStatus('voiceStatus', 'Recording is not available in this browser. Attach an audio file instead.', true);
     return;
   }
 
@@ -418,58 +481,63 @@ async function toggleVoiceRecording() {
       const file = new File([blob], `recording-${Date.now()}.webm`, {
         type: blob.type || 'audio/webm'
       });
-      await uploadVoiceFile(file, 'Saving recorded voice note…');
+      await saveRecording(file);
     });
     voiceRecorder.start();
-    setButtonBusy('recordVoiceButton', true, 'Stop', 'Record');
-    document.getElementById('recordVoiceButton').textContent = 'Stop';
-    document.getElementById('recordVoiceButton').disabled = false;
-    setStatus('voiceStatus', 'Recording… click Stop when finished.');
+    setRecordingUi(true);
+    setStatus('voiceStatus', 'Recording… tap again to stop and save.');
   } catch {
     setStatus(
       'voiceStatus',
-      'Could not access the microphone. You can still upload an audio file.',
+      'Could not access the microphone. You can attach an audio file instead.',
       true
     );
   }
 }
 
-async function addUrl() {
-  const input = document.getElementById('urlText');
-  const url = input.value.trim();
-  if (!url) {
-    setStatus('noteStatus', 'Paste a URL before saving.', true);
-    input.focus();
-    return;
-  }
-  setButtonBusy('addUrlButton', true, 'Saving…', 'Save URL');
-  setStatus('noteStatus', 'Saving URL and fetching article text…');
-  try {
-    const item = await fetchJson(
-      '/api/items/url',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url})
-      },
-      'Unable to save URL.'
-    );
-    if (input.value.trim() === url) input.value = '';
-    setStatus(
-      'noteStatus',
-      item.processing_status === 'ready'
-        ? 'URL saved and processed.'
-        : `URL saved but processing failed: ${item.error_message || 'unknown error'}`,
-      item.processing_status !== 'ready'
-    );
-    await loadNotes();
-    await loadLatestAnalysis();
-    await loadDashboard();
-  } catch {
-    setStatus('noteStatus', 'We could not save that URL.', true);
-  } finally {
-    setButtonBusy('addUrlButton', false, 'Saving…', 'Save URL');
-  }
+function setUpCaptureBox() {
+  const card = document.getElementById('captureCard');
+  const textarea = document.getElementById('noteText');
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  document.getElementById('captureShortcut').textContent = isMac ? '⌘ + Enter' : 'Ctrl + Enter';
+
+  textarea.addEventListener('input', updateCaptureHint);
+  textarea.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      addNote();
+    }
+  });
+  // Pasting a screenshot or copied file attaches it; pasted text behaves normally.
+  textarea.addEventListener('paste', event => {
+    const files = event.clipboardData && event.clipboardData.files;
+    if (files && files.length) {
+      event.preventDefault();
+      attachCaptureFile(files[0]);
+    }
+  });
+
+  let dragDepth = 0;
+  card.addEventListener('dragenter', event => {
+    if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes('Files')) return;
+    event.preventDefault();
+    dragDepth += 1;
+    card.classList.add('dragging');
+  });
+  card.addEventListener('dragover', event => {
+    if (card.classList.contains('dragging')) event.preventDefault();
+  });
+  card.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) card.classList.remove('dragging');
+  });
+  card.addEventListener('drop', event => {
+    if (!event.dataTransfer || !event.dataTransfer.files.length) return;
+    event.preventDefault();
+    dragDepth = 0;
+    card.classList.remove('dragging');
+    attachCaptureFile(event.dataTransfer.files[0]);
+  });
 }
 
 function esc(str) {
@@ -1731,6 +1799,7 @@ function renderGreeting() {
 window.addEventListener('hashchange', () => routeFromHash({ moveFocus: true }));
 routeFromHash();
 renderGreeting();
+setUpCaptureBox();
 
 syncControlsFromUrl();
 loadAuthUser();
