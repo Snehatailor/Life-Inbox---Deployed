@@ -330,6 +330,16 @@
             <a class="button-link" id="gcalExport" href="/api/calendar/export.ics" download>Download deadlines (.ics)</a>
             <a class="button-link secondary" href="https://calendar.google.com/calendar" target="_blank" rel="noopener">Open Google Calendar</a>
           </div>
+          <div class="busy-import">
+            <strong>Free-time suggestions</strong>
+            <p id="busyLine" class="sub">Import your calendar so “Find time” avoids your meetings.</p>
+            <p class="sub">In Google Calendar: Settings → Import &amp; export → Export, then pick the unzipped .ics file here.</p>
+            <label class="button-link secondary busy-file">
+              Import calendar (.ics)
+              <input type="file" id="busyFile" accept=".ics,text/calendar" hidden>
+            </label>
+            <button type="button" id="busyClear" class="ghost" hidden>Clear imported calendar</button>
+          </div>
         </div>
         <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
         <h3 id="calendarTitle"></h3>

@@ -118,3 +118,46 @@ def test_unsupported_and_empty_text_files_are_rejected(client):
     assert bad.status_code == 415
     empty = client.post("/api/items/textfile", files={"file": ("a.txt", b"  \n", "text/plain")})
     assert empty.status_code == 400
+
+
+def _high_task(client, days):
+    return _quick(client, f"Prepare slides {_iso(days)} high priority")
+
+
+def test_slots_without_calendar_use_working_hours(client):
+    task = _high_task(client, 3)
+    result = client.get(f"/api/tasks/{task['id']}/slots?minutes=45").json()
+    assert result["calendar_loaded"] is False
+    assert 1 <= len(result["slots"]) <= 3
+    assert result["slots"][0]["google_url"].startswith("https://calendar.google.com/")
+    assert client.get(f"/api/tasks/{task['id']}/slots?minutes=5").status_code == 422
+    assert client.get("/api/tasks/9999/slots").status_code == 404
+
+
+def test_imported_busy_blocks_are_avoided_and_clearable(client):
+    task = _high_task(client, 2)
+    first_day = client.get(f"/api/tasks/{task['id']}/slots?minutes=60").json()["slots"][0]
+    start = first_day["start"]
+    stamp = start[:19].replace("-", "").replace(":", "")
+    ics = (
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\n"
+        f"DTSTART:{stamp}Z\r\nDTEND:{stamp[:9]}{int(stamp[9:11]) + 2:02d}{stamp[11:]}Z\r\n"
+        "SUMMARY:Planning\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    imported = client.post(
+        "/api/calendar/busy/import", files={"file": ("cal.ics", ics.encode(), "text/calendar")}
+    )
+    assert imported.status_code == 200 and imported.json()["imported"] == 1
+    assert client.get("/api/calendar/busy").json()["count"] == 1
+
+    after = client.get(f"/api/tasks/{task['id']}/slots?minutes=60").json()
+    assert after["calendar_loaded"] is True
+    assert after["slots"][0]["start"] != start
+
+    assert client.delete("/api/calendar/busy").status_code == 204
+    assert client.get("/api/calendar/busy").json()["count"] == 0
+
+
+def test_bad_calendar_files_are_rejected(client):
+    bad = client.post("/api/calendar/busy/import", files={"file": ("x.ics", b"hello", "text/calendar")})
+    assert bad.status_code == 400

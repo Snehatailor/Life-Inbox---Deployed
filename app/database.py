@@ -267,6 +267,18 @@ class PointEventRecord(Base):
     created_at = Column(Text, nullable=False)
 
 
+class BusyBlockRecord(Base):
+    __tablename__ = "busy_blocks"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    starts_at = Column(Text, nullable=False)
+    ends_at = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    created_at = Column(Text, nullable=False)
+
+
 class CalendarActionReceiptRecord(Base):
     __tablename__ = "calendar_action_receipts"
     __table_args__ = {"sqlite_autoincrement": True}
@@ -1290,6 +1302,48 @@ def update_task_fields(
         task.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
         return _task_to_dict(session, task)
+
+
+def replace_busy_blocks(blocks: list[dict]) -> int:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        session.execute(
+            delete(BusyBlockRecord).where(BusyBlockRecord.owner_user_id == owner_id)
+        )
+        for block in blocks:
+            session.add(
+                BusyBlockRecord(
+                    owner_user_id=owner_id,
+                    starts_at=block["starts_at"],
+                    ends_at=block["ends_at"],
+                    summary=block.get("summary"),
+                    created_at=now,
+                )
+            )
+        session.commit()
+    return len(blocks)
+
+
+def list_busy_blocks() -> list[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(BusyBlockRecord)
+            .where(BusyBlockRecord.owner_user_id == owner_id)
+            .order_by(BusyBlockRecord.starts_at.asc())
+        ).all()
+        return [
+            {"starts_at": r.starts_at, "ends_at": r.ends_at, "summary": r.summary}
+            for r in rows
+        ]
+
+
+def get_task_for_slots(task_id: int) -> Optional[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        return None if task is None else _task_to_dict(session, task)
 
 
 def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:

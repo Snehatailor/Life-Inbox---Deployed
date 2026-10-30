@@ -566,3 +566,11 @@ a[data-view-link="calendar"] { position: relative; }
 .quest-help summary { cursor: pointer; color: var(--muted); }
 .quest-help ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .streak-live, .quest-pop-go, .quest-celebrate { animation: none; } .ring-fill, .level-track i { transition: none; } }
+
+/* Phase 8: time slots */
+.slots-panel { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.slots-head { flex: 1 0 100%; }
+.slots-head select { margin-left: 6px; padding: 4px 8px; }
+.slots-note { flex: 1 0 100%; margin: 4px 0 0; font-size: 12px; }
+.busy-import { flex: 1 0 100%; border-top: 1px solid var(--border, #3a4654); padding-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.busy-import .sub { margin: 0; }

@@ -1082,6 +1082,87 @@ def calendar_export_ics():
     )
 
 
+MAX_ICS_BYTES = 2 * 1024 * 1024
+
+
+@app.post("/api/calendar/busy/import")
+async def import_busy_ics(file: UploadFile = File(...)):
+    from app.attention.dates import configured_timezone
+    from app.database import replace_busy_blocks
+    from app.game.slots import parse_ics_busy
+
+    data = await file.read(MAX_ICS_BYTES + 1)
+    if len(data) > MAX_ICS_BYTES:
+        raise HTTPException(status_code=413, detail="Calendar files must be under 2 MB.")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="That is not a UTF-8 .ics file.") from exc
+    if "BEGIN:VCALENDAR" not in text.upper():
+        raise HTTPException(status_code=400, detail="That does not look like an .ics calendar.")
+    blocks = parse_ics_busy(text, configured_timezone())
+    return {"imported": replace_busy_blocks(blocks)}
+
+
+@app.get("/api/calendar/busy")
+def busy_summary():
+    from app.database import list_busy_blocks
+
+    blocks = list_busy_blocks()
+    return {
+        "count": len(blocks),
+        "first": blocks[0]["starts_at"] if blocks else None,
+        "last": blocks[-1]["ends_at"] if blocks else None,
+    }
+
+
+@app.delete("/api/calendar/busy", status_code=status.HTTP_204_NO_CONTENT)
+def clear_busy():
+    from app.database import replace_busy_blocks
+
+    replace_busy_blocks([])
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/tasks/{task_id}/slots")
+def task_slots(task_id: int, minutes: int = Query(45, ge=15, le=240)):
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+
+    from app.attention.dates import configured_timezone
+    from app.database import get_task_for_slots, list_busy_blocks
+    from app.game.gcal import google_timed_event_url
+    from app.game.slots import suggest_slots
+
+    task = get_task_for_slots(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if task["status"] != "open":
+        raise HTTPException(status_code=400, detail="Only open tasks need a time slot.")
+    tz = configured_timezone()
+    busy_rows = list_busy_blocks()
+    busy = [
+        (_dt.fromisoformat(b["starts_at"]), _dt.fromisoformat(b["ends_at"]))
+        for b in busy_rows
+    ]
+    deadline = _date.fromisoformat(task["due_on"]) if task["due_on"] else None
+    slots = suggest_slots(busy, minutes, deadline, _dt.now(_tz.utc), tz)
+    title = f"[{task['priority']}] {task['text']}"
+    for slot in slots:
+        slot["google_url"] = google_timed_event_url(
+            title,
+            _dt.fromisoformat(slot["start"]),
+            _dt.fromisoformat(slot["end"]),
+            str(tz),
+        )
+    return {
+        "task_id": task_id,
+        "minutes": minutes,
+        "deadline": task["due_on"],
+        "calendar_loaded": bool(busy_rows),
+        "slots": slots,
+    }
+
+
 @app.get("/api/calendar/tasks")
 def calendar_tasks():
     """Return open scheduled tasks for the in-app calendar.

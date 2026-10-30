@@ -23,6 +23,21 @@ def google_event_url(title: str, due_on: str, details: str = "") -> str:
     return f"https://calendar.google.com/calendar/render?{query}"
 
 
+def google_timed_event_url(title: str, start: datetime, end: datetime, tz_name: str) -> str:
+    """Timed event in Google's template link, in the given time zone."""
+    fmt = "%Y%m%dT%H%M%S"
+    query = urlencode(
+        {
+            "action": "TEMPLATE",
+            "text": title,
+            "dates": f"{start.strftime(fmt)}/{end.strftime(fmt)}",
+            "ctz": tz_name,
+            "details": "Time block from Life Inbox",
+        }
+    )
+    return f"https://calendar.google.com/calendar/render?{query}"
+
+
 def _escape(value: str) -> str:
     return (
         value.replace("\\", "\\\\")

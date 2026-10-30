@@ -1200,6 +1200,11 @@ function renderTask(task) {
         })
       );
     }
+    if (task.priority === 'High' && task.due_on) {
+      actions.append(
+        actionButton('Find time', 'secondary', () => toggleSlots(task, root))
+      );
+    }
     if (task.google_event_url) {
       actions.append(
         actionButton('Add to Google Calendar', 'secondary', () => {
@@ -2883,3 +2888,99 @@ document.getElementById('soundToggle').addEventListener('click', () => {
   if (soundOn) playChime(false);
 });
 paintSoundToggle();
+
+
+// ---- Phase 8: suggested time slots for High tasks ----
+async function toggleSlots(task, card, minutes = 45) {
+  let panel = card.querySelector('.slots-panel');
+  if (panel && !panel.dataset.reload) {
+    panel.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.className = 'slots-panel';
+    card.append(panel);
+  }
+  delete panel.dataset.reload;
+  panel.textContent = 'Looking for free time…';
+  try {
+    const result = await fetchJson(
+      `/api/tasks/${task.id}/slots?minutes=${minutes}`,
+      undefined,
+      'Unable to find time.'
+    );
+    panel.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'slots-head';
+    const label = document.createElement('label');
+    label.textContent = 'Time needed ';
+    const select = document.createElement('select');
+    for (const value of [15, 30, 45, 60, 90, 120, 180]) {
+      const option = document.createElement('option');
+      option.value = String(value);
+      option.textContent = value >= 60 ? `${value / 60} h` : `${value} min`;
+      option.selected = value === result.minutes;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      panel.dataset.reload = '1';
+      toggleSlots(task, card, Number(select.value));
+    });
+    label.append(select);
+    head.append(label);
+    panel.append(head);
+    if (!result.slots.length) {
+      const none = document.createElement('p');
+      none.className = 'muted';
+      none.textContent = `No free ${minutes}-minute slot before the deadline. Try a shorter block or move the deadline.`;
+      panel.append(none);
+    }
+    for (const slot of result.slots) {
+      const button = actionButton(slot.label, 'secondary slot-btn', () => {
+        window.open(slot.google_url, '_blank', 'noopener');
+      });
+      panel.append(button);
+    }
+    const note = document.createElement('p');
+    note.className = 'muted slots-note';
+    note.textContent = result.calendar_loaded
+      ? 'Avoids the meetings in your imported calendar. Opens Google Calendar for you to confirm.'
+      : 'No calendar imported, so these only respect 9–18 weekdays. Import your calendar on the Google Calendar screen.';
+    panel.append(note);
+  } catch {
+    panel.textContent = 'Could not look up free time.';
+  }
+}
+
+async function loadBusySummary() {
+  try {
+    const summary = await fetchJson('/api/calendar/busy', undefined, 'Unable to load calendar import.');
+    const line = document.getElementById('busyLine');
+    document.getElementById('busyClear').hidden = !summary.count;
+    line.textContent = summary.count
+      ? `${summary.count} busy blocks loaded (${summary.first.slice(0, 10)} to ${summary.last.slice(0, 10)}). “Find time” avoids them.`
+      : 'Import your calendar so “Find time” avoids your meetings.';
+  } catch { /* optional */ }
+}
+
+document.getElementById('busyFile').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const result = await fetchJson('/api/calendar/busy/import', {method: 'POST', body: form}, 'Unable to import calendar.');
+    showToast(`Imported ${result.imported} busy blocks.`);
+    await loadBusySummary();
+  } catch {
+    showToast('That file could not be imported. Use an .ics export from your calendar.');
+  }
+});
+document.getElementById('busyClear').addEventListener('click', async () => {
+  await fetch('/api/calendar/busy', {method: 'DELETE'});
+  showToast('Imported calendar cleared.');
+  await loadBusySummary();
+});
+loadBusySummary();
