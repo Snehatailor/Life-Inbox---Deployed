@@ -664,3 +664,10 @@ a[data-view-link="calendar"] { position: relative; }
 .calendar-section .bin-zone { margin: 0 0 12px; }
 
 .raised-pill { background: #f2994a26; color: #f2994a; font-weight: 600; cursor: help; }
+
+/* Coins replace "pts" everywhere */
+.coin { width: 1.3em; height: 1.3em; vertical-align: -0.3em; margin-left: .2em; flex: none; }
+.points-chip { display: inline-flex; align-items: center; }
+.coins-kept { color: var(--muted); }
+.quest-pop .coin, .quest-ring-text .coin { width: 1.1em; height: 1.1em; }
+.lane .coin { width: 1.1em; height: 1.1em; }

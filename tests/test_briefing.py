@@ -23,8 +23,8 @@ def test_full_briefing_mentions_overdue_due_next_and_points():
     assert "1 task overdue: Renew passport." in text
     assert "1 task due today: Book dentist." in text
     assert "Next up is Send report, tomorrow." in text
-    assert "70 of 100 points, 30 to go" in text
-    assert "Finishing Renew passport is worth 30 points." in text
+    assert "70 of 100 coins, 30 to go" in text
+    assert "Finishing Renew passport is worth 30 coins." in text
     assert "Your streak is 2 days." in text
     assert (result["overdue"], result["due_today"], result["upcoming"]) == (1, 1, 2)
 
@@ -33,7 +33,7 @@ def test_nothing_due_and_goal_met():
     result = build_briefing([_task("Later", 5)], {**SUMMARY, "points_today": 120, "goal_met": True, "streak": 1}, TODAY, 20)
     assert "Nothing is due today." in result["text"]
     assert "Next up is Later, in 5 days." in result["text"]
-    assert "already hit your 100 point goal today with 120" in result["text"]
+    assert "already hit your 100 coin goal today with 120" in result["text"]
     assert "Your streak is 1 day." in result["text"]
 
 

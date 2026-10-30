@@ -164,9 +164,11 @@ Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if over
 
 Rule: an open task with a deadline is raised to High within 2 days (or when overdue); a Low task within 5 days is raised to Medium. It never lowers. A priority you set yourself (Edit, priority lane, or saying "high/low priority" in quick-add) is pinned and never raised.
 
-- [ ] A task due in 2 days with no stated priority appears under High with an "↑ due soon" tag, worth 30 points
+- [ ] A task due in 2 days with no stated priority appears under High with an "↑ due soon" tag, worth 30 coins
 - [ ] The tag tooltip says which priority it was raised from
 - [ ] A task due in 5 days stays in its own section; "low priority" said in quick-add stays Low even when due today
 - [ ] Edit a raised task's priority to Medium: the tag disappears and it stays Medium
 - [ ] Completing a raised task awards points at the raised level
 - [ ] Leave the page open across midnight (or change the date): lists reload and tasks move up without a manual refresh
+
+- [ ] Everywhere the app showed "pts" or "points" it now shows a gold coin image or the word "coins" (task rows, priority lanes, daily ring, level line, leaderboard, toasts, spoken briefing)

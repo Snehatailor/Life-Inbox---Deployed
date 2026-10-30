@@ -56,13 +56,13 @@ def build_briefing(open_tasks: list[dict], summary: dict, today: date, hour: int
 
     points, goal = summary["points_today"], summary["goal"]
     if summary["goal_met"]:
-        parts.append(f"You have already hit your {goal} point goal today with {points}.")
+        parts.append(f"You have already hit your {goal} coin goal today with {points}.")
     else:
-        parts.append(f"You are at {points} of {goal} points, {goal - points} to go.")
+        parts.append(f"You are at {points} of {goal} coins, {goal - points} to go.")
         pool = overdue + due_today or upcoming
         if pool:
             best = max(pool, key=lambda t: t["points_value"])
-            parts.append(f"Finishing {_short(best['text'])} is worth {best['points_value']} points.")
+            parts.append(f"Finishing {_short(best['text'])} is worth {best['points_value']} coins.")
     if summary["streak"]:
         parts.append(f"Your streak is {_plural(summary['streak'], 'day')}.")
 

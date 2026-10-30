@@ -11,6 +11,19 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="coinGold" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffe680"/>
+        <stop offset="1" stop-color="#e3a300"/>
+      </linearGradient>
+    </defs>
+    <symbol id="coin" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="11" fill="url(#coinGold)" stroke="#b97a00" stroke-width="1.2"/>
+      <circle cx="12" cy="12" r="7.6" fill="none" stroke="#b97a00" stroke-opacity=".55" stroke-width="1.2"/>
+      <path d="m12 7.2 1.55 3.15 3.45.5-2.5 2.45.6 3.45L12 15.1l-3.1 1.65.6-3.45L7 10.85l3.45-.5Z" fill="#b97a00" fill-opacity=".85"/>
+    </symbol>
+  </svg>
   <div class="app-shell">
     <!-- One nav: a sidebar on wide screens, a bottom tab bar on phones. -->
     <aside class="sidebar">
@@ -134,13 +147,13 @@
             </svg>
             <div class="quest-ring-text">
               <strong id="questPoints">0</strong>
-              <span>/ <span id="questGoal">100</span> pts</span>
+              <span>/ <span id="questGoal">100</span> <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></span>
             </div>
             <span id="questPop" class="quest-pop" aria-hidden="true"></span>
           </div>
           <div class="quest-body">
             <h2 id="questHeading">Daily quest</h2>
-            <p id="questLine" class="sub">Score 100 points today.</p>
+            <p id="questLine" class="sub">Earn 100 coins today.</p>
             <p class="quest-meta">
               <span id="questLevel" class="pill"></span>
               <span id="questStreak"></span>
@@ -155,10 +168,10 @@
               <details class="quest-help">
                 <summary>How it works</summary>
                 <ul>
-                  <li>Finish tasks to earn points: <b>High 30</b>, <b>Medium 20</b>, <b>Low 10</b>.</li>
-                  <li>Done a day or more early: <b>+5</b>. Overdue: <b>half</b> points.</li>
-                  <li>Reach <b>100</b> points in a day to keep your 🔥 streak.</li>
-                  <li>Binned tasks keep their points. Reopening a task takes them back.</li>
+                  <li>Finish tasks to earn coins: <b>High 30</b>, <b>Medium 20</b>, <b>Low 10</b>.</li>
+                  <li>Done a day or more early: <b>+5</b>. Overdue: <b>half</b> coins.</li>
+                  <li>Reach <b>100</b> coins in a day to keep your 🔥 streak.</li>
+                  <li>Binned tasks keep their coins. Reopening a task takes them back.</li>
                   <li>Say or type a task, drag tasks onto a priority or a day, and drop files anywhere.</li>
                 </ul>
               </details>
@@ -235,9 +248,9 @@
         </form>
         <div id="taskDrops" class="task-drops" hidden>
           <div class="lane-row" id="priorityLanes" aria-label="Drop a task on a priority">
-            <div class="lane lane-high" data-priority="High">High · 30 pts</div>
-            <div class="lane lane-medium" data-priority="Medium">Medium · 20 pts</div>
-            <div class="lane lane-low" data-priority="Low">Low · 10 pts</div>
+            <div class="lane lane-high" data-priority="High">High · 30 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
+            <div class="lane lane-medium" data-priority="Medium">Medium · 20 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
+            <div class="lane lane-low" data-priority="Low">Low · 10 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
           </div>
           <div class="day-row" id="dayStrip" aria-label="Drop a task on a day to set its deadline"></div>
         </div>
@@ -286,7 +299,7 @@
         <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
         <div id="binZone" class="bin-zone" aria-label="Drop finished tasks here to move them to the bin">
           <span class="bin-icon" aria-hidden="true">🗑️</span>
-          <span>Drag a finished task (✓) from the calendar here. It leaves the calendar but stays in Tasks → Backlog with its points.</span>
+          <span>Drag a finished task (✓) from the calendar here. It leaves the calendar but stays in Tasks → Backlog with its coins.</span>
         </div>
         <h3 id="calendarTitle"></h3>
         <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>

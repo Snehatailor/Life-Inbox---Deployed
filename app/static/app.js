@@ -937,8 +937,8 @@ async function loadGame() {
       ? 'Daily goal reached. Everything from here is bonus.'
       : `${left} point${left === 1 ? '' : 's'} to go today.`;
     const lvl = game.level;
-    document.getElementById('questLevel').textContent =
-      `Lv ${lvl.number} ${lvl.title} · ${game.lifetime_points} pts`;
+    document.getElementById('questLevel').innerHTML =
+      `Lv ${lvl.number} ${esc(lvl.title)} · ${coinHtml(game.lifetime_points)}`;
     const fill = document.getElementById('levelFill');
     const next = document.getElementById('levelNext');
     if (lvl.next_at === null) {
@@ -947,7 +947,7 @@ async function loadGame() {
     } else {
       const pct = Math.round(((game.lifetime_points - lvl.floor) / (lvl.next_at - lvl.floor)) * 100);
       fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-      next.textContent = `${lvl.points_to_next} pts to the next level`;
+      next.textContent = `${lvl.points_to_next} coins to the next level`;
     }
     const streakEl = document.getElementById('questStreak');
     streakEl.textContent = game.streak ? `🔥 ${game.streak}-day streak` : 'No streak yet';
@@ -959,19 +959,19 @@ async function loadGame() {
     for (const day of game.history) {
       const cell = document.createElement('div');
       cell.className = `week-cell${day.goal_met ? ' week-met' : ''}`;
-      cell.title = `${day.day}: ${day.points} pts`;
+      cell.title = `${day.day}: ${day.points} coins`;
       cell.innerHTML = `<span class="week-bar"><i style="height:${Math.min(100, day.points)}%"></i></span><small>${day.weekday}</small>`;
       week.append(cell);
     }
     if (lastQuestPoints !== null && game.points_today > lastQuestPoints) {
       const pop = document.getElementById('questPop');
-      pop.textContent = `+${game.points_today - lastQuestPoints}`;
+      pop.innerHTML = coinHtml(game.points_today - lastQuestPoints, '+');
       pop.classList.remove('quest-pop-go');
       void pop.offsetWidth;
       pop.classList.add('quest-pop-go');
       playChime(false);
       if (game.goal_met && lastQuestPoints < game.goal) {
-        showToast('🎉 Daily goal reached: 100 points!');
+        showToast('🎉 Daily goal reached: 100 coins!');
         launchConfetti();
         playChime(true);
         document.getElementById('questCard').classList.add('quest-celebrate');
@@ -1000,7 +1000,7 @@ async function addQuickTask(sentence) {
 
 function announceNewTask(task) {
   const when = task.due_on ? ` · ${task.days_left_label}` : '';
-  showToast(`Added “${task.text}” · ${task.priority} (+${task.points_value} pts)${when}`);
+  showToast(`Added “${task.text}” · ${task.priority} (+${task.points_value} coins)${when}`);
 }
 
 const BRIEFING_COMMAND = /^(?:hey,?\s+)?(?:what(?:'s| is| do i have)?\b.*\b(?:due|today)\b|(?:read|give me|tell me)\b.*\b(?:briefing|agenda|tasks|due)\b|(?:daily )?briefing\??$|any(?:thing)? due\b.*)/i;
@@ -1644,6 +1644,15 @@ const FORMAT_ICONS = {
   pdf: '📄', image: '🖼️', audio: '🎙️', link: '🔗', note: '📝',
   spreadsheet: '📊', data: '🧩', textfile: '📃', other: '📦'
 };
+// The coin image is defined once in index.html (#coin) and reused everywhere.
+function coinIcon() {
+  return '<svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg>';
+}
+
+function coinHtml(amount, prefix = '') {
+  return `${prefix}${amount}${coinIcon()}`;
+}
+
 const SNOOZE_CHOICES = [['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7]];
 const PRIORITY_LEVELS = ['High', 'Medium', 'Low'];
 
@@ -1879,7 +1888,7 @@ function openTaskEditor(task, row) {
 
   const priority = h('select');
   for (const level of PRIORITY_LEVELS) {
-    const option = h('option', '', `${level} · ${({High: 30, Medium: 20, Low: 10})[level]} pts`);
+    const option = h('option', '', `${level} · ${({High: 30, Medium: 20, Low: 10})[level]} coins`);
     option.value = level;
     option.selected = level === task.priority;
     priority.append(option);
@@ -1941,7 +1950,10 @@ function rowBadges(task) {
     raised.title = `Raised from ${task.base_priority} because the deadline is close. Edit the priority to keep it as you choose.`;
     wrap.append(raised);
   }
-  wrap.append(h('span', 'points-chip', `+${task.points_value} pts`));
+  const worth = h('span', 'points-chip');
+  worth.innerHTML = coinHtml(task.points_value, '+');
+  worth.title = `Worth ${task.points_value} coins`;
+  wrap.append(worth);
   if (task.due_on) {
     const badge = h('span', 'days-badge');
     badge.dataset.dueOn = task.due_on;
@@ -2024,8 +2036,13 @@ function renderStoredTaskRow(task, state) {
   const label = state === 'done' ? 'Done' : state === 'done (binned)' ? 'Done · in Backlog' : 'Deleted · in Backlog';
   head.append(h('strong', '', task.text), h('span', priorityClass(task.priority), task.priority), h('span', 'pill', label));
   const meta = h('div', 'task-meta');
-  const extra = task.completed_at ? ` · done ${task.completed_at.slice(0, 10)} · +${task.points_awarded || 0} pts kept` : '';
+  const extra = task.completed_at ? ` · done ${task.completed_at.slice(0, 10)} · ` : '';
   meta.textContent = `${task.domain}${extra}`;
+  if (task.completed_at) {
+    const kept = h('span', 'coins-kept');
+    kept.innerHTML = `${coinHtml(task.points_awarded || 0, '+')} kept`;
+    meta.append(kept);
+  }
   const actions = h('div', 'task-actions');
   if (state === 'done') {
     const reopen = iconButton('undo', 'Reopen', '', async () => {
@@ -2108,8 +2125,9 @@ function renderAttention(openTasks) {
     summary.append(
       h('span', 'prio-name', `${level} priority`),
       h('span', 'prio-count', String(tasks.length)),
-      h('span', 'prio-pts muted', `+${({High: 30, Medium: 20, Low: 10})[level]} pts each`)
+      h('span', 'prio-pts muted')
     );
+    summary.lastChild.innerHTML = `${coinHtml(({High: 30, Medium: 20, Low: 10})[level], '+')} each`;
     section.append(summary);
     if (!tasks.length) {
       section.append(h('p', 'muted prio-empty', 'Nothing here.'));
@@ -2138,7 +2156,7 @@ function renderTasksScreen(tasks, filter) {
   paintDayStrip();
   if (!tasks.length) {
     root.innerHTML = filter === 'backlog'
-      ? emptyStateHtml({icon: 'check', title: 'Backlog is empty', text: 'Finished tasks you bin, and tasks you delete, wait here with their points kept.'})
+      ? emptyStateHtml({icon: 'check', title: 'Backlog is empty', text: 'Finished tasks you bin, and tasks you delete, wait here with their coins kept.'})
       : emptyStateHtml({icon: 'check', title: 'No open tasks', text: 'Say or type a task above, or analyze your inbox to turn notes into tasks.', action: '<a class="button-link" href="#inbox">Go to Inbox</a>'});
     return;
   }
@@ -2425,7 +2443,7 @@ function renderCalendar() {
       const event = h('div', `calendar-entry${entry.source === 'inbox' ? ' inbox-entry' : ''}${entry.source === 'done' ? ' done-entry' : ''}`);
       if (entry.source === 'done') {
         event.textContent = `✓ ${entry.text}`;
-        event.title = `Done: ${entry.text}${entry.points ? ` (+${entry.points} pts)` : ''}. Drag to the bin to move it to Backlog.`;
+        event.title = `Done: ${entry.text}${entry.points ? ` (+${entry.points} coins)` : ''}. Drag to the bin to move it to Backlog.`;
         event.draggable = true;
         event.dataset.taskId = String(entry.task_id);
         event.addEventListener('dragstart', dragEvent => {
@@ -2826,16 +2844,16 @@ async function loadTeam() {
 
 function teamFormHtml() {
   return `
-    <p class="sub">Compete on weekly points with friends or colleagues. Only your name, points, streak and tasks done are shared — never task text.</p>
+    <p class="sub">Compete on weekly coins with friends or colleagues. Only your name, coins, streak and tasks done are shared — never task text.</p>
     <div class="team-forms">
       <form id="teamCreateForm" class="team-form">
         <label>Create a team <input name="name" maxlength="40" minlength="2" required placeholder="Team name"></label>
-        <label class="check"><input type="checkbox" name="share" checked> Show my points on the board</label>
+        <label class="check"><input type="checkbox" name="share" checked> Show my coins on the board</label>
         <button type="submit">Create</button>
       </form>
       <form id="teamJoinForm" class="team-form">
         <label>Join with a code <input name="code" maxlength="20" minlength="4" required placeholder="Invite code" autocomplete="off"></label>
-        <label class="check"><input type="checkbox" name="share" checked> Show my points on the board</label>
+        <label class="check"><input type="checkbox" name="share" checked> Show my coins on the board</label>
         <button type="submit" class="secondary">Join</button>
       </form>
     </div>
@@ -2881,12 +2899,12 @@ function renderTeam(team) {
         <button type="button" class="ghost" id="teamCopy">Copy</button></div>
     </div>
     <table class="team-table">
-      <thead><tr><th>#</th><th>Name</th><th>Week pts</th><th>Done</th><th>Streak</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" class="muted">Nobody is sharing points yet.</td></tr>'}</tbody>
+      <thead><tr><th>#</th><th>Name</th><th>Week ${coinIcon()}</th><th>Done</th><th>Streak</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="muted">Nobody is sharing coins yet.</td></tr>'}</tbody>
     </table>
-    ${team.private_count ? `<p class="muted team-private">${team.private_count} member${team.private_count === 1 ? ' keeps' : 's keep'} points private.</p>` : ''}
+    ${team.private_count ? `<p class="muted team-private">${team.private_count} member${team.private_count === 1 ? ' keeps' : 's keep'} coins private.</p>` : ''}
     <div class="team-foot">
-      <label class="check"><input type="checkbox" id="teamShare" ${team.i_share ? 'checked' : ''}> Show my points on the board</label>
+      <label class="check"><input type="checkbox" id="teamShare" ${team.i_share ? 'checked' : ''}> Show my coins on the board</label>
       <button type="button" class="ghost" id="teamLeave">Leave team</button>
     </div>
     <p id="teamError" class="status" role="status" aria-live="polite"></p>`;
@@ -2902,13 +2920,13 @@ function renderTeam(team) {
     try {
       const result = await teamRequest('/api/teams/me', 'PATCH', {share: event.target.checked}, 'Could not update sharing.');
       renderTeam(result.team);
-      showToast(event.target.checked ? 'Your points are now visible to the team.' : 'Your points are now private.');
+      showToast(event.target.checked ? 'Your coins are now visible to the team.' : 'Your coins are now private.');
     } catch (error) {
       setStatus('teamError', error.message, true);
     }
   });
   document.getElementById('teamLeave').addEventListener('click', async () => {
-    if (!window.confirm('Leave this team? Your points stay yours.')) return;
+    if (!window.confirm('Leave this team? Your coins stay yours.')) return;
     try {
       await teamRequest('/api/teams/leave', 'POST', undefined, 'Could not leave the team.');
       renderTeam(null);

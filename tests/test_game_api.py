@@ -169,7 +169,7 @@ def test_briefing_endpoint_reads_real_tasks(client):
     body = client.get("/api/game/briefing").json()
     assert body["due_today"] == 1 and body["overdue"] == 1
     assert "Pay rent" in body["text"] and "Write report" in body["text"]
-    assert "0 of 100 points, 100 to go" in body["text"]
+    assert "0 of 100 coins, 100 to go" in body["text"]
 
 
 def test_tasks_get_a_domain_that_a_person_can_override(client):
