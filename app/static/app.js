@@ -177,7 +177,34 @@ function relativeDueLabel(isoDate) {
   return `${Math.abs(days)} days overdue`;
 }
 
+function daysLeftFromIso(isoDate) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = dateFromIso(isoDate);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+
+function paintDaysBadge(badge) {
+  const dueOn = badge.dataset.dueOn;
+  if (!dueOn) {
+    badge.hidden = true;
+    return;
+  }
+  const left = daysLeftFromIso(dueOn);
+  let level = 'safe';
+  let label = `${left} days left`;
+  if (left < 0) { level = 'overdue'; label = `${-left} day${left === -1 ? '' : 's'} overdue`; }
+  else if (left === 0) { level = 'due'; label = 'Due today'; }
+  else if (left === 1) { level = 'soon'; label = '1 day left'; }
+  else if (left <= 2) { level = 'soon'; }
+  badge.hidden = false;
+  badge.className = `days-badge days-${level}`;
+  badge.textContent = label;
+}
+
 function refreshDynamicDates() {
+  document.querySelectorAll('.days-badge').forEach(paintDaysBadge);
   document.querySelectorAll('[data-due-on]').forEach(element => {
     const dueOn = element.dataset.dueOn;
     element.textContent = dueOn ? `${relativeDueLabel(dueOn)} · ${dueOn}` : '';
@@ -1072,6 +1099,16 @@ function renderTask(task) {
     meta.append(due);
   }
 
+  const badge = document.createElement('span');
+  badge.className = 'days-badge';
+  badge.dataset.dueOn = task.due_on || '';
+  paintDaysBadge(badge);
+  if (task.due_on) priority.after(badge);
+  const worth = document.createElement('span');
+  worth.className = 'points-chip';
+  worth.textContent = `+${task.points_value} pts`;
+  priority.after(worth);
+
   const actions = document.createElement('div');
   actions.className = 'task-actions';
 
@@ -1130,6 +1167,36 @@ function renderTask(task) {
         })
       );
     }
+    if (!task.due_on && task.suggested_due_on) {
+      actions.append(
+        actionButton(`Set deadline ${task.suggested_due_on}`, 'secondary', async () => {
+          try {
+            await fetchJson(
+              `/api/tasks/${task.id}/confirm-timing`,
+              {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({timing_text: task.suggested_due_on})
+              },
+              'Unable to set deadline.'
+            );
+            showToast(`Deadline set for ${task.suggested_due_on}.`);
+            await loadTasks();
+            await loadAttention();
+            await loadCalendar();
+          } catch {
+            setStatus('taskStatus', 'Could not set deadline.', true);
+          }
+        })
+      );
+    }
+    if (task.google_event_url) {
+      actions.append(
+        actionButton('Add to Google Calendar', 'secondary', () => {
+          window.open(task.google_event_url, '_blank', 'noopener');
+        })
+      );
+    }
     if (task.timing_confirmed && (task.due_on || task.timing_text)) {
       actions.append(
         actionButton('Preview calendar', 'secondary', () => {
@@ -1137,7 +1204,35 @@ function renderTask(task) {
         })
       );
     }
+  } else if (task.binned_at) {
+    const earned = document.createElement('span');
+    earned.textContent = ` · Completed ${(task.completed_at || '').slice(0, 10)} · +${task.points_awarded || 0} pts kept`;
+    meta.append(earned);
+    actions.append(
+      actionButton('Restore', '', async () => {
+        try {
+          await fetchJson(`/api/tasks/${task.id}/restore`, {method: 'POST'}, 'Unable to restore task.');
+          showToast('Task restored to Completed.');
+          await loadTasks();
+        } catch {
+          setStatus('taskStatus', 'Could not restore this task.', true);
+        }
+      })
+    );
   } else {
+    if (task.status === 'completed') {
+      root.draggable = true;
+      root.classList.add('task-draggable');
+      root.addEventListener('dragstart', event => {
+        event.dataTransfer.setData('text/x-task-id', String(task.id));
+        event.dataTransfer.effectAllowed = 'move';
+        root.classList.add('task-dragging');
+      });
+      root.addEventListener('dragend', () => root.classList.remove('task-dragging'));
+      actions.append(
+        actionButton('Bin it', 'secondary', () => binTask(task.id, root))
+      );
+    }
     actions.append(
       actionButton('Reopen', '', () => {
         transitionTask(task.id, 'reopen', actions);
@@ -1220,8 +1315,208 @@ async function undoTaskTransition(taskId, action) {
   }
 }
 
+let lastQuestPoints = null;
+
+async function loadGame() {
+  try {
+    const game = await fetchJson('/api/game/today', undefined, 'Unable to load progress.');
+    const circumference = 2 * Math.PI * 52;
+    const ring = document.getElementById('questRing');
+    ring.style.strokeDasharray = String(circumference);
+    ring.style.strokeDashoffset = String(circumference * (1 - game.percent / 100));
+    ring.classList.toggle('ring-complete', game.goal_met);
+    document.getElementById('questPoints').textContent = String(game.points_today);
+    document.getElementById('questGoal').textContent = String(game.goal);
+    const left = Math.max(0, game.goal - game.points_today);
+    document.getElementById('questLine').textContent = game.goal_met
+      ? 'Daily goal reached. Everything from here is bonus.'
+      : `${left} point${left === 1 ? '' : 's'} to go today.`;
+    const lvl = game.level;
+    document.getElementById('questLevel').textContent =
+      `Lv ${lvl.number} ${lvl.title} · ${game.lifetime_points} pts`;
+    document.getElementById('questStreak').textContent =
+      game.streak ? `🔥 ${game.streak}-day streak` : 'No streak yet';
+    document.getElementById('questDone').textContent =
+      ` · ${game.tasks_done_today} done today`;
+    const week = document.getElementById('questWeek');
+    week.innerHTML = '';
+    for (const day of game.history) {
+      const cell = document.createElement('div');
+      cell.className = `week-cell${day.goal_met ? ' week-met' : ''}`;
+      cell.title = `${day.day}: ${day.points} pts`;
+      cell.innerHTML = `<span class="week-bar"><i style="height:${Math.min(100, day.points)}%"></i></span><small>${day.weekday}</small>`;
+      week.append(cell);
+    }
+    if (lastQuestPoints !== null && game.points_today > lastQuestPoints) {
+      const pop = document.getElementById('questPop');
+      pop.textContent = `+${game.points_today - lastQuestPoints}`;
+      pop.classList.remove('quest-pop-go');
+      void pop.offsetWidth;
+      pop.classList.add('quest-pop-go');
+      if (game.goal_met && lastQuestPoints < game.goal) {
+        showToast('🎉 Daily goal reached: 100 points!');
+        document.getElementById('questCard').classList.add('quest-celebrate');
+        setTimeout(() => document.getElementById('questCard').classList.remove('quest-celebrate'), 1800);
+      }
+    }
+    lastQuestPoints = game.points_today;
+  } catch {
+    /* progress is decorative; ignore failures */
+  }
+}
+
+// Voice to task: browser speech recognition first, recorded-audio upload as fallback.
+async function addQuickTask(sentence) {
+  const task = await fetchJson(
+    '/api/tasks/quick',
+    {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sentence})
+    },
+    'Unable to add task.'
+  );
+  announceNewTask(task);
+}
+
+function announceNewTask(task) {
+  const when = task.due_on ? ` · ${task.days_left_label}` : '';
+  showToast(`Added “${task.text}” · ${task.priority} (+${task.points_value} pts)${when}`);
+}
+
+function setupQuickTask() {
+  const form = document.getElementById('quickTaskForm');
+  const input = document.getElementById('quickTaskInput');
+  const mic = document.getElementById('quickMic');
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let listening = null;
+
+  async function submit(sentence) {
+    const value = sentence.trim();
+    if (!value) return;
+    try {
+      await addQuickTask(value);
+      input.value = '';
+      document.getElementById('taskStatusFilter').value = 'open';
+      await loadTasks();
+      await loadAttention();
+      await loadCalendar();
+    } catch {
+      setStatus('taskStatus', 'Could not add that task. Try rephrasing it.', true);
+    }
+  }
+
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    submit(input.value);
+  });
+
+  async function recordAndUpload() {
+    if (listening) {
+      listening.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      const chunks = [];
+      const recorder = new MediaRecorder(stream);
+      listening = recorder;
+      mic.classList.add('mic-live');
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        mic.classList.remove('mic-live');
+        listening = null;
+        const form = new FormData();
+        form.append('file', new Blob(chunks, {type: recorder.mimeType || 'audio/webm'}), 'voice-task.webm');
+        try {
+          const task = await fetchJson('/api/tasks/voice', {method: 'POST', body: form}, 'Unable to transcribe.');
+          announceNewTask(task);
+          await loadTasks();
+        } catch {
+          setStatus('taskStatus', 'Transcription is unavailable. Type the task instead.', true);
+        }
+      };
+      recorder.start();
+    } catch {
+      setStatus('taskStatus', 'Microphone is not available. Type the task instead.', true);
+    }
+  }
+
+  mic.addEventListener('click', () => {
+    if (!Recognition) {
+      recordAndUpload();
+      return;
+    }
+    if (listening) {
+      listening.stop();
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = navigator.language || 'en-US';
+    recognition.interimResults = true;
+    listening = recognition;
+    mic.classList.add('mic-live');
+    input.placeholder = 'Listening…';
+    recognition.onresult = event => {
+      input.value = Array.from(event.results).map(r => r[0].transcript).join(' ');
+    };
+    recognition.onerror = () => {
+      setStatus('taskStatus', 'Could not hear that. Check the microphone permission or type it.', true);
+    };
+    recognition.onend = () => {
+      mic.classList.remove('mic-live');
+      input.placeholder = 'Say or type: “Call the dentist Friday, high priority”';
+      listening = null;
+      if (input.value.trim()) submit(input.value);
+    };
+    recognition.start();
+  });
+}
+setupQuickTask();
+
+async function binTask(taskId, card) {
+  try {
+    await fetchJson(`/api/tasks/${taskId}/bin`, {method: 'POST'}, 'Unable to bin task.');
+    if (card) {
+      card.classList.add('task-binned');
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
+    showToast('Binned. Find it any time in Backlog.', {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await fetchJson(`/api/tasks/${taskId}/restore`, {method: 'POST'}, 'Unable to undo.');
+        await loadTasks();
+      }
+    });
+    await loadTasks();
+  } catch {
+    setStatus('taskStatus', 'Could not bin this task.', true);
+  }
+}
+
+function setupBinZone() {
+  const zone = document.getElementById('binZone');
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    zone.classList.add('bin-over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('bin-over'));
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    zone.classList.remove('bin-over');
+    const id = Number(event.dataTransfer.getData('text/x-task-id'));
+    if (!id) return;
+    const card = document.querySelector(`.task[data-task-id="${id}"]`);
+    binTask(id, card);
+  });
+}
+setupBinZone();
+
 async function loadTasks() {
+  loadGame();
   const filter = document.getElementById('taskStatusFilter').value;
+  document.getElementById('binZone').hidden = filter !== 'completed';
   try {
     const tasks = await fetchJson(
       `/api/tasks?status=${encodeURIComponent(filter)}`,
@@ -1239,7 +1534,8 @@ async function loadTasks() {
           action: '<a class="button-link" href="#inbox">Go to Inbox</a>'
         },
         completed: {title: 'Nothing completed yet', text: 'Tasks you complete will be listed here.'},
-        dismissed: {title: 'No dismissed tasks', text: 'Tasks you dismiss will be listed here.'}
+        dismissed: {title: 'No dismissed tasks', text: 'Tasks you dismiss will be listed here.'},
+        backlog: {title: 'Backlog is empty', text: 'Completed tasks you bin are kept here, with their points.'}
       };
       root.innerHTML = emptyStateHtml({icon: 'check', ...(emptyTasks[filter] || emptyTasks.open)});
       updateNavCounts();
@@ -1824,7 +2120,24 @@ function renderCalendar() {
   }
 }
 
+async function loadGcalStatus() {
+  const dot = document.getElementById('gcalDot');
+  const line = document.getElementById('gcalLine');
+  try {
+    const status = await fetchJson('/api/calendar/status', undefined, 'Unable to load calendar status.');
+    const live = status.oauth_connected && status.writes_enabled;
+    dot.className = `gcal-dot ${live ? 'gcal-on' : 'gcal-link'}`;
+    dot.title = live ? 'Connected to Google Calendar' : 'Link mode: events open in Google Calendar for you to save';
+    line.textContent = live
+      ? 'Connected. Confirmed events are written to your Google Calendar.'
+      : 'Link mode: use “Add to Google Calendar” on any task, or download all deadlines as one .ics file to import. Nothing is written without your confirmation.';
+  } catch {
+    line.textContent = 'Could not check the calendar connection.';
+  }
+}
+
 async function loadCalendar() {
+  loadGcalStatus();
   try {
     calendarTasks = await fetchJson(
       '/api/calendar/tasks',
@@ -2108,7 +2421,10 @@ document.addEventListener('keydown', event => {
   }
 });
 
-window.addEventListener('hashchange', () => routeFromHash({ moveFocus: true }));
+window.addEventListener('hashchange', () => {
+  routeFromHash({ moveFocus: true });
+  loadGame();
+});
 routeFromHash();
 renderGreeting();
 setUpCaptureBox();
@@ -2125,6 +2441,12 @@ loadDashboard();
 loadAttention();
 loadCalendar();
 window.setInterval(refreshDynamicDates, 60 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    refreshDynamicDates();
+    loadGame();
+  }
+});
 
 window.addEventListener('popstate', () => {
   routeFromHash();

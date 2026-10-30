@@ -180,13 +180,22 @@ class PersistedAnalysis(AnalysisResult):
 
 
 TaskStatus = Literal["open", "completed", "dismissed"]
-TaskListStatus = Literal["open", "completed", "dismissed", "all"]
+TaskListStatus = Literal["open", "completed", "dismissed", "backlog", "all"]
 
 
 class Task(BaseModel):
     id: int
     text: str
     priority: Priority
+    days_left: Optional[int] = None
+    days_left_label: Optional[str] = None
+    urgency: str = "none"
+    suggested_due_on: Optional[str] = None
+    points_value: int = 10
+    google_event_url: Optional[str] = None
+    completed_at: Optional[str] = None
+    points_awarded: Optional[int] = None
+    binned_at: Optional[str] = None
     timing_text: Optional[str]
     ai_timing_text: Optional[str] = None
     timing_confirmed: bool = False
@@ -198,6 +207,10 @@ class Task(BaseModel):
     source_item_ids: List[int]
     created_at: str
     updated_at: str
+
+
+class QuickTaskRequest(BaseModel):
+    sentence: str = Field(min_length=2, max_length=500)
 
 
 class TaskTimingConfirm(BaseModel):

@@ -459,3 +459,64 @@ button:disabled, button:disabled:hover { cursor: not-allowed; opacity: 0.6; tran
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Task Quest: deadline badge and points chip */
+.days-badge, .points-chip { display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.points-chip { background: var(--surface-2); color: var(--text-2); }
+.days-safe { background: #dff5e6; color: #14663a; }
+.days-soon { background: var(--warn-soft); color: var(--warn-text); }
+.days-due { background: #ffd9b3; color: #8a3b00; }
+.days-overdue { background: var(--danger-soft); color: var(--danger-text); }
+
+/* Task Quest: daily ring */
+.quest-card { display: flex; gap: 20px; align-items: center; margin-bottom: 16px; }
+.quest-ring-wrap { position: relative; width: 120px; height: 120px; flex: none; }
+.quest-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.quest-ring circle { fill: none; stroke-width: 10; }
+.ring-track { stroke: var(--surface-2); }
+.ring-fill { stroke: var(--accent, #3b8ea5); stroke-linecap: round; transition: stroke-dashoffset .8s ease; }
+.ring-fill.ring-complete { stroke: #2fb36d; }
+.quest-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+.quest-ring-text strong { font-size: 28px; }
+.quest-ring-text span { font-size: 12px; color: var(--muted); }
+.quest-pop { position: absolute; top: 0; right: -4px; font-weight: 800; font-size: 20px; color: #2fb36d; opacity: 0; pointer-events: none; }
+.quest-pop-go { animation: questPop 1.2s ease-out; }
+@keyframes questPop { 0% { opacity: 0; transform: translateY(14px) scale(.7); } 25% { opacity: 1; transform: translateY(0) scale(1.2); } 100% { opacity: 0; transform: translateY(-26px) scale(1); } }
+.quest-celebrate { animation: questGlow 1.8s ease; }
+@keyframes questGlow { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 4px #2fb36d, 0 0 32px #2fb36d88; } }
+.quest-body { min-width: 0; flex: 1; }
+.quest-body h2 { margin: 0 0 4px; }
+.quest-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin: 8px 0; }
+.quest-week { display: flex; gap: 8px; }
+.week-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.week-bar { width: 14px; height: 36px; background: var(--surface-2); border-radius: 4px; display: flex; align-items: flex-end; overflow: hidden; }
+.week-bar i { display: block; width: 100%; background: var(--muted); }
+.week-met .week-bar i { background: #2fb36d; }
+.week-cell small { font-size: 10px; color: var(--muted); }
+@media (max-width: 520px) { .quest-card { flex-direction: column; text-align: center; } .quest-meta, .quest-week { justify-content: center; } }
+
+/* Task Quest: bin and backlog */
+.bin-zone { display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin-bottom: 12px; border: 2px dashed var(--muted); border-radius: 12px; color: var(--muted); font-size: 14px; transition: all .2s ease; }
+.bin-zone[hidden] { display: none; }
+.bin-icon { font-size: 26px; transition: transform .2s ease; }
+.bin-over { border-color: #2fb36d; background: #2fb36d18; color: inherit; }
+.bin-over .bin-icon { transform: scale(1.35) rotate(-12deg); }
+.task-draggable { cursor: grab; }
+.task-dragging { opacity: .5; }
+.task-binned { transition: transform .45s ease-in, opacity .45s ease-in; transform: translateY(40px) scale(.2) rotate(8deg); opacity: 0; pointer-events: none; }
+
+/* Task Quest: voice / quick add */
+.quick-task { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.quick-task input { flex: 1; min-width: 0; }
+.mic-btn { width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 20px; flex: none; }
+.mic-live { background: #d64545; animation: micPulse 1s infinite; }
+@keyframes micPulse { 0% { box-shadow: 0 0 0 0 #d6454588; } 100% { box-shadow: 0 0 0 14px #d6454500; } }
+
+/* Task Quest: Google Calendar */
+.gcal-dot { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; background: var(--muted); flex: none; }
+.gcal-dot.gcal-link { background: #e0a800; }
+.gcal-dot.gcal-on { background: #2fb36d; }
+.gcal-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; }
+.gcal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+a[data-view-link="calendar"] { position: relative; }
+@media (max-width: 900px) { .gcal-dot { position: absolute; top: 6px; right: calc(50% - 20px); margin: 0; } }

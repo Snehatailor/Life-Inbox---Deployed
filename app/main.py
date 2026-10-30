@@ -92,6 +92,7 @@ from app.schemas import (
     Priority,
     SearchHit,
     Task,
+    QuickTaskRequest,
     TaskListStatus,
     TaskReminderRequest,
     TaskSnoozeRequest,
@@ -817,6 +818,79 @@ def _transition_task(task_id: int, task_status: str):
     return task
 
 
+def _quick_task_from_sentence(sentence: str):
+    from app.attention.dates import today_in_configured_tz
+    from app.database import create_quick_task
+    from app.game.voice_task import parse_spoken_task
+
+    parsed = parse_spoken_task(sentence, today_in_configured_tz())
+    if len(parsed["text"]) < 2:
+        raise HTTPException(status_code=422, detail="I could not find a task in that.")
+    return create_quick_task(
+        parsed["text"],
+        parsed["priority"],
+        parsed["due_on"],
+        parsed["due_confidence"],
+    )
+
+
+@app.post("/api/tasks/quick", response_model=Task)
+def create_quick_task_endpoint(payload: QuickTaskRequest):
+    return _quick_task_from_sentence(payload.sentence)
+
+
+@app.post("/api/tasks/voice", response_model=Task)
+async def create_voice_task(file: UploadFile = File(...)):
+    """Server-side fallback when the browser has no speech recognition."""
+    data = await file.read()
+    try:
+        _, mime, _ = validate_audio_upload(
+            file.filename or "voice-task.webm", file.content_type, data
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = process_voice_bytes(
+        data, original_filename=file.filename or "voice-task.webm", mime_type=mime
+    )
+    sentence = (result.get("extracted_text") or "").strip()
+    if not sentence:
+        raise HTTPException(
+            status_code=422,
+            detail="Transcription is not available. Type the task instead.",
+        )
+    return _quick_task_from_sentence(sentence)
+
+
+@app.post("/api/tasks/{task_id}/bin", response_model=Task)
+def bin_task(task_id: int):
+    from app.database import set_task_binned
+
+    try:
+        task = set_task_binned(task_id, True)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.post("/api/tasks/{task_id}/restore", response_model=Task)
+def restore_task(task_id: int):
+    from app.database import set_task_binned
+
+    task = set_task_binned(task_id, False)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/api/game/today")
+def game_today():
+    from app.database import game_summary_from_db
+
+    return game_summary_from_db()
+
+
 @app.post("/api/tasks/{task_id}/complete", response_model=Task)
 def complete_task(task_id: int):
     return _transition_task(task_id, "completed")
@@ -929,6 +1003,18 @@ def calendar_status():
         "mode": status.mode,
         "message": status.message,
     }
+
+
+@app.get("/api/calendar/export.ics")
+def calendar_export_ics():
+    from app.game.gcal import build_ics
+
+    tasks = list_tasks_from_db("open")
+    return Response(
+        content=build_ics(tasks),
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="life-inbox-deadlines.ics"'},
+    )
 
 
 @app.get("/api/calendar/tasks")

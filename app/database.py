@@ -3,7 +3,7 @@ import json
 import os
 import re
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,13 +19,26 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    delete,
     event,
+    func,
     or_,
     select,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from app.attention.dates import today_in_configured_tz
+from app.game.gcal import google_event_url
+from app.game.progress import build_game_summary
+from app.game.scoring import (
+    points_for,
+    PRIORITY_POINTS,
+    days_left,
+    days_left_label,
+    default_due_offset,
+    urgency,
+)
 from app.capture.pipeline import (
     ANALYZABLE_STATUSES,
     ANALYZABLE_TYPES,
@@ -230,8 +243,25 @@ class TaskRecord(Base):
     status = Column(Text, nullable=False)
     dedup_key = Column(Text, nullable=False)
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    completed_at = Column(Text, nullable=True)
+    points_awarded = Column(Integer, nullable=True)
+    binned_at = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
+
+
+class PointEventRecord(Base):
+    __tablename__ = "point_events"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    points = Column(Integer, nullable=False)
+    day = Column(Text, nullable=False)
+    created_at = Column(Text, nullable=False)
 
 
 class CalendarActionReceiptRecord(Base):
@@ -1040,10 +1070,31 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         .where(TaskSourceItemRecord.task_id == task.id)
         .order_by(TaskSourceItemRecord.item_id.asc())
     ).all()
+    today = today_in_configured_tz()
+    suggested_due_on = None
+    if not task.due_on:
+        suggested_due_on = (
+            today + timedelta(days=default_due_offset(task.priority))
+        ).isoformat()
     return {
         "id": task.id,
         "text": task.text,
         "priority": task.priority,
+        "days_left": days_left(task.due_on, today),
+        "days_left_label": days_left_label(task.due_on, today),
+        "urgency": urgency(task.due_on, today),
+        "suggested_due_on": suggested_due_on,
+        "points_value": PRIORITY_POINTS.get(task.priority, 10),
+        "google_event_url": (
+            google_event_url(
+                f"[{task.priority}] {task.text}", task.due_on, "From Life Inbox"
+            )
+            if task.due_on
+            else None
+        ),
+        "completed_at": task.completed_at,
+        "points_awarded": task.points_awarded,
+        "binned_at": task.binned_at,
         "timing_text": task.timing_text,
         "ai_timing_text": task.ai_timing_text,
         "timing_confirmed": bool(task.timing_confirmed),
@@ -1059,7 +1110,7 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
 
 
 def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
-    if status_filter not in TASK_STATUSES | {"all"}:
+    if status_filter not in TASK_STATUSES | {"all", "backlog"}:
         raise ValueError("Unsupported task status")
 
     owner_id = require_owner_id()
@@ -1069,8 +1120,13 @@ def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
             .where(TaskRecord.owner_user_id == owner_id)
             .order_by(TaskRecord.id.asc())
         )
-        if status_filter != "all":
-            statement = statement.where(TaskRecord.status == status_filter)
+        if status_filter == "backlog":
+            statement = statement.where(TaskRecord.binned_at.is_not(None))
+        elif status_filter != "all":
+            statement = statement.where(
+                TaskRecord.status == status_filter,
+                TaskRecord.binned_at.is_(None),
+            )
         tasks = session.scalars(statement).all()
         return [_task_to_dict(session, task) for task in tasks]
 
@@ -1085,10 +1141,105 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         if task is None:
             return None
         if task.status != task_status:
+            now = datetime.now(timezone.utc)
+            today = today_in_configured_tz()
+            if task_status == "completed" and task.points_awarded is None:
+                points = points_for(task.priority, task.due_on, today)
+                task.points_awarded = points
+                task.completed_at = now.isoformat()
+                session.add(
+                    PointEventRecord(
+                        owner_user_id=owner_id,
+                        task_id=task.id,
+                        points=points,
+                        day=today.isoformat(),
+                        created_at=now.isoformat(),
+                    )
+                )
+            elif task.status == "completed" and task_status != "completed":
+                # Reopening or dismissing takes the points back, so
+                # complete -> reopen -> complete cannot farm points.
+                session.execute(
+                    delete(PointEventRecord).where(
+                        PointEventRecord.task_id == task.id
+                    )
+                )
+                task.points_awarded = None
+                task.completed_at = None
             task.status = task_status
-            task.updated_at = datetime.now(timezone.utc).isoformat()
+            task.updated_at = now.isoformat()
             session.commit()
         return _task_to_dict(session, task)
+
+
+def create_quick_task(
+    text: str,
+    priority: str,
+    due_on: Optional[str],
+    due_confidence: Optional[str],
+) -> dict:
+    """Create a task directly from a spoken or typed sentence (no source note)."""
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    dedup_key = hashlib.sha256(
+        f"quick:{owner_id}:{text}:{now}".encode("utf-8")
+    ).hexdigest()
+    with SessionLocal() as session:
+        task = TaskRecord(
+            text=text,
+            priority=priority,
+            timing_text=due_on,
+            timing_confirmed=1 if due_on else 0,
+            due_on=due_on,
+            due_confidence=due_confidence or ("high" if due_on else None),
+            status=TASK_OPEN,
+            dedup_key=dedup_key,
+            owner_user_id=owner_id,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(task)
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:
+    """Move a completed task to the bin (backlog) or restore it.
+
+    Binning never changes status or points, so the daily total is unchanged.
+    """
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if binned and task.status != TASK_COMPLETED:
+            raise ValueError("Only completed tasks can be binned")
+        now = datetime.now(timezone.utc).isoformat()
+        task.binned_at = now if binned else None
+        task.updated_at = now
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def game_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    today = today_in_configured_tz()
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PointEventRecord.day, func.sum(PointEventRecord.points))
+            .where(PointEventRecord.owner_user_id == owner_id)
+            .group_by(PointEventRecord.day)
+        ).all()
+        done_today = session.scalar(
+            select(func.count(PointEventRecord.id)).where(
+                PointEventRecord.owner_user_id == owner_id,
+                PointEventRecord.day == today.isoformat(),
+            )
+        )
+    return build_game_summary(
+        {day: int(total) for day, total in rows}, today, int(done_today or 0)
+    )
 
 
 def add_pdf_item_to_db(

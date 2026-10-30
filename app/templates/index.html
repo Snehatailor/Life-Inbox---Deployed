@@ -45,7 +45,8 @@
         </a>
         <a href="#calendar" data-view-link="calendar">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-          <span>Calendar</span>
+          <span>Google Calendar</span>
+          <span id="gcalDot" class="gcal-dot" title="Google Calendar status"></span>
         </a>
         <a href="#ask" data-view-link="ask">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -119,6 +120,30 @@
           </div>
           <p id="noteStatus" class="status muted" role="status" aria-live="polite"></p>
         </div>
+
+        <section id="questCard" class="card quest-card" aria-labelledby="questHeading">
+          <div class="quest-ring-wrap">
+            <svg class="quest-ring" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+              <circle id="questRing" class="ring-fill" cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="quest-ring-text">
+              <strong id="questPoints">0</strong>
+              <span>/ <span id="questGoal">100</span> pts</span>
+            </div>
+            <span id="questPop" class="quest-pop" aria-hidden="true"></span>
+          </div>
+          <div class="quest-body">
+            <h2 id="questHeading">Daily quest</h2>
+            <p id="questLine" class="sub">Score 100 points today.</p>
+            <p class="quest-meta">
+              <span id="questLevel" class="pill"></span>
+              <span id="questStreak"></span>
+              <span id="questDone"></span>
+            </p>
+            <div id="questWeek" class="quest-week" aria-label="Last 7 days"></div>
+          </div>
+        </section>
 
         <div class="today-grid">
           <section class="today-attention" aria-labelledby="attentionHeading">
@@ -226,10 +251,20 @@
               <option value="open">Open</option>
               <option value="completed">Completed</option>
               <option value="dismissed">Dismissed</option>
+              <option value="backlog">Backlog (bin)</option>
             </select>
           </div>
         </header>
         <p id="taskStatus" class="status muted" role="status" aria-live="polite"></p>
+        <form id="quickTaskForm" class="quick-task" autocomplete="off">
+          <button type="button" id="quickMic" class="mic-btn" aria-label="Speak a task" title="Speak a task">🎤</button>
+          <input id="quickTaskInput" type="text" maxlength="500" placeholder="Say or type: “Call the dentist Friday, high priority”" aria-label="New task">
+          <button type="submit" id="quickAdd">Add</button>
+        </form>
+        <div id="binZone" class="bin-zone" hidden aria-label="Drop completed tasks here to bin them">
+          <span class="bin-icon" aria-hidden="true">🗑️</span>
+          <span>Drop done tasks here. They leave your list but stay in Backlog.</span>
+        </div>
         <div id="tasksList"></div>
 
         <h2>Calendar export</h2>
@@ -252,6 +287,16 @@
             <button type="button" class="secondary" onclick="moveCalendar(1)">Next</button>
           </div>
         </header>
+        <div class="card gcal-card">
+          <div>
+            <strong>Google Calendar</strong>
+            <p id="gcalLine" class="sub">Checking connection…</p>
+          </div>
+          <div class="gcal-actions">
+            <a class="button-link" id="gcalExport" href="/api/calendar/export.ics" download>Download deadlines (.ics)</a>
+            <a class="button-link secondary" href="https://calendar.google.com/calendar" target="_blank" rel="noopener">Open Google Calendar</a>
+          </div>
+        </div>
         <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
         <h3 id="calendarTitle"></h3>
         <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
