@@ -222,6 +222,20 @@ class TaskPatch(BaseModel):
     due_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=40)
+    share: bool = False
+
+
+class TeamJoin(BaseModel):
+    code: str = Field(min_length=4, max_length=20)
+    share: bool = False
+
+
+class TeamSharing(BaseModel):
+    share: bool
+
+
 class QuickTaskRequest(BaseModel):
     sentence: str = Field(min_length=2, max_length=500)
 

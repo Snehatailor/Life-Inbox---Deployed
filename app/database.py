@@ -32,6 +32,12 @@ from app.attention.dates import today_in_configured_tz
 from app.game.gcal import google_event_url
 from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
+from app.game.teams import (
+    build_leaderboard,
+    new_invite_code,
+    normalize_code,
+    week_start,
+)
 from app.game.scoring import (
     points_for,
     PRIORITY_POINTS,
@@ -277,6 +283,30 @@ class BusyBlockRecord(Base):
     ends_at = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
+
+
+class TeamRecord(Base):
+    __tablename__ = "teams"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False)
+    invite_code = Column(Text, nullable=False, unique=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class TeamMemberRecord(Base):
+    __tablename__ = "team_members"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    share_points = Column(Integer, nullable=False, default=0)
+    joined_at = Column(Text, nullable=False)
 
 
 class CalendarActionReceiptRecord(Base):
@@ -1344,6 +1374,152 @@ def get_task_for_slots(task_id: int) -> Optional[dict]:
     with SessionLocal() as session:
         task = _owned_task(session, task_id, owner_id)
         return None if task is None else _task_to_dict(session, task)
+
+
+def _membership(session, owner_id: int) -> Optional["TeamMemberRecord"]:
+    return session.scalar(
+        select(TeamMemberRecord).where(TeamMemberRecord.user_id == owner_id)
+    )
+
+
+def create_team(name: str, share: bool) -> dict:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        if _membership(session, owner_id) is not None:
+            raise ValueError("You are already in a team. Leave it first.")
+        team = TeamRecord(
+            name=name.strip(),
+            invite_code=new_invite_code(),
+            created_by=owner_id,
+            created_at=now,
+        )
+        session.add(team)
+        session.flush()
+        session.add(
+            TeamMemberRecord(
+                team_id=team.id,
+                user_id=owner_id,
+                share_points=1 if share else 0,
+                joined_at=now,
+            )
+        )
+        session.commit()
+    return team_summary_from_db()
+
+
+def join_team(code: str, share: bool) -> dict:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        if _membership(session, owner_id) is not None:
+            raise ValueError("You are already in a team. Leave it first.")
+        team = session.scalar(
+            select(TeamRecord).where(TeamRecord.invite_code == normalize_code(code))
+        )
+        if team is None:
+            raise LookupError("No team has that invite code.")
+        session.add(
+            TeamMemberRecord(
+                team_id=team.id,
+                user_id=owner_id,
+                share_points=1 if share else 0,
+                joined_at=now,
+            )
+        )
+        session.commit()
+    return team_summary_from_db()
+
+
+def set_team_sharing(share: bool) -> Optional[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        member = _membership(session, owner_id)
+        if member is None:
+            return None
+        member.share_points = 1 if share else 0
+        session.commit()
+    return team_summary_from_db()
+
+
+def leave_team() -> bool:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        member = _membership(session, owner_id)
+        if member is None:
+            return False
+        team_id = member.team_id
+        session.delete(member)
+        session.flush()
+        remaining = session.scalar(
+            select(func.count(TeamMemberRecord.id)).where(
+                TeamMemberRecord.team_id == team_id
+            )
+        )
+        if not remaining:
+            session.execute(delete(TeamRecord).where(TeamRecord.id == team_id))
+        session.commit()
+    return True
+
+
+def team_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    today = today_in_configured_tz()
+    with SessionLocal() as session:
+        mine = _membership(session, owner_id)
+        if mine is None:
+            return {"team": None}
+        team = session.get(TeamRecord, mine.team_id)
+        rows = session.execute(
+            select(TeamMemberRecord, UserRecord)
+            .join(UserRecord, UserRecord.id == TeamMemberRecord.user_id)
+            .where(TeamMemberRecord.team_id == team.id)
+        ).all()
+        member_ids = [m.user_id for m, _ in rows]
+        events = session.execute(
+            select(
+                PointEventRecord.owner_user_id,
+                PointEventRecord.day,
+                func.sum(PointEventRecord.points),
+                func.count(PointEventRecord.id),
+            )
+            .where(PointEventRecord.owner_user_id.in_(member_ids))
+            .group_by(PointEventRecord.owner_user_id, PointEventRecord.day)
+        ).all()
+        start = week_start(today).isoformat()
+        by_user: dict[int, dict] = {uid: {} for uid in member_ids}
+        tasks_week: dict[int, int] = {uid: 0 for uid in member_ids}
+        for uid, day, points, count in events:
+            by_user[uid][day] = int(points)
+            if day >= start:
+                tasks_week[uid] += int(count)
+        board = build_leaderboard(
+            [
+                {
+                    "user_id": m.user_id,
+                    "display_name": u.display_name,
+                    "share": bool(m.share_points),
+                    "by_day": by_user[m.user_id],
+                    "tasks_week": tasks_week[m.user_id],
+                }
+                for m, u in rows
+            ],
+            today,
+        )
+        for row in board["rows"]:
+            row["is_me"] = row.pop("user_id") == owner_id
+        return {
+            "team": {
+                "id": team.id,
+                "name": team.name,
+                "invite_code": team.invite_code,
+                "member_count": len(rows),
+                "i_share": bool(mine.share_points),
+                "week_start": board["week_start"],
+                "rows": board["rows"],
+                "private_count": board["private_count"],
+            }
+        }
 
 
 def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:

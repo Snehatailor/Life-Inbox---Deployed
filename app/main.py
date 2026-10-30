@@ -95,6 +95,9 @@ from app.schemas import (
     DomainUpdate,
     QuickTaskRequest,
     TaskPatch,
+    TeamCreate,
+    TeamJoin,
+    TeamSharing,
     TaskListStatus,
     TaskReminderRequest,
     TaskSnoozeRequest,
@@ -947,6 +950,54 @@ def restore_task(task_id: int):
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
     return task
+
+
+@app.get("/api/teams/me")
+def my_team():
+    from app.database import team_summary_from_db
+
+    return team_summary_from_db()
+
+
+@app.post("/api/teams")
+def create_team_endpoint(payload: TeamCreate):
+    from app.database import create_team
+
+    try:
+        return create_team(payload.name, payload.share)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/teams/join")
+def join_team_endpoint(payload: TeamJoin):
+    from app.database import join_team
+
+    try:
+        return join_team(payload.code, payload.share)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.patch("/api/teams/me")
+def team_sharing_endpoint(payload: TeamSharing):
+    from app.database import set_team_sharing
+
+    summary = set_team_sharing(payload.share)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="You are not in a team.")
+    return summary
+
+
+@app.post("/api/teams/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_team_endpoint():
+    from app.database import leave_team
+
+    if not leave_team():
+        raise HTTPException(status_code=404, detail="You are not in a team.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/game/today")

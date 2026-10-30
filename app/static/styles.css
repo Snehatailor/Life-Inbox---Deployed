@@ -574,3 +574,20 @@ a[data-view-link="calendar"] { position: relative; }
 .slots-note { flex: 1 0 100%; margin: 4px 0 0; font-size: 12px; }
 .busy-import { flex: 1 0 100%; border-top: 1px solid var(--border, #3a4654); padding-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .busy-import .sub { margin: 0; }
+
+/* Phase 9: team leaderboard */
+.team-card { margin-bottom: 16px; }
+.team-card h2 { margin: 0 0 6px; }
+.team-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.team-form { display: flex; flex-direction: column; gap: 8px; }
+.team-form label:not(.check) { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.team-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 8px; }
+.team-code code { padding: 2px 8px; border-radius: 6px; background: var(--surface-2); letter-spacing: 2px; font-weight: 700; }
+.team-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.team-table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+.team-table td { padding: 8px 6px; border-top: 1px solid var(--border, #2b3644); }
+.team-table td small { display: block; color: var(--muted); font-size: 11px; }
+.team-me td { background: #2fb36d14; }
+.team-private { margin: 8px 0 0; font-size: 12px; }
+.team-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }

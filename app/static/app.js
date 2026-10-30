@@ -1544,6 +1544,7 @@ setupBinZone();
 
 async function loadTasks() {
   loadGame();
+  loadTeam();
   const filter = document.getElementById('taskStatusFilter').value;
   document.getElementById('binZone').hidden = filter !== 'completed';
   document.getElementById('taskDrops').hidden = filter !== 'open';
@@ -2456,6 +2457,7 @@ document.addEventListener('keydown', event => {
 window.addEventListener('hashchange', () => {
   routeFromHash({ moveFocus: true });
   loadGame();
+  loadTeam();
 });
 routeFromHash();
 renderGreeting();
@@ -2984,3 +2986,127 @@ document.getElementById('busyClear').addEventListener('click', async () => {
   await loadBusySummary();
 });
 loadBusySummary();
+
+
+// ---- Phase 9: team leaderboard (opt-in, points only) ----
+async function teamRequest(url, method, body, failure) {
+  const options = {method};
+  if (body !== undefined) {
+    options.headers = {'Content-Type': 'application/json'};
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    let detail = failure;
+    try { detail = (await response.json()).detail || failure; } catch { /* keep default */ }
+    throw new Error(typeof detail === 'string' ? detail : failure);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+async function loadTeam() {
+  const body = document.getElementById('teamBody');
+  if (!body) return;
+  try {
+    const {team} = await fetchJson('/api/teams/me', undefined, 'Unable to load team.');
+    renderTeam(team);
+  } catch {
+    body.textContent = 'Could not load your team.';
+  }
+}
+
+function teamFormHtml() {
+  return `
+    <p class="sub">Compete on weekly points with friends or colleagues. Only your name, points, streak and tasks done are shared — never task text.</p>
+    <div class="team-forms">
+      <form id="teamCreateForm" class="team-form">
+        <label>Create a team <input name="name" maxlength="40" minlength="2" required placeholder="Team name"></label>
+        <label class="check"><input type="checkbox" name="share" checked> Show my points on the board</label>
+        <button type="submit">Create</button>
+      </form>
+      <form id="teamJoinForm" class="team-form">
+        <label>Join with a code <input name="code" maxlength="20" minlength="4" required placeholder="Invite code" autocomplete="off"></label>
+        <label class="check"><input type="checkbox" name="share" checked> Show my points on the board</label>
+        <button type="submit" class="secondary">Join</button>
+      </form>
+    </div>
+    <p id="teamError" class="status" role="status" aria-live="polite"></p>`;
+}
+
+function renderTeam(team) {
+  const body = document.getElementById('teamBody');
+  if (!team) {
+    body.innerHTML = teamFormHtml();
+    const wire = (id, url, field) => {
+      document.getElementById(id).addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const payload = {share: form.get('share') === 'on'};
+        payload[field] = form.get(field);
+        try {
+          const result = await teamRequest(url, 'POST', payload, 'Could not do that.');
+          renderTeam(result.team);
+          showToast(field === 'name' ? 'Team created. Share the invite code.' : 'You joined the team.');
+        } catch (error) {
+          setStatus('teamError', error.message, true);
+        }
+      });
+    };
+    wire('teamCreateForm', '/api/teams', 'name');
+    wire('teamJoinForm', '/api/teams/join', 'code');
+    return;
+  }
+  const medals = ['🥇', '🥈', '🥉'];
+  const rows = team.rows.map(row => `
+    <tr class="${row.is_me ? 'team-me' : ''}">
+      <td>${medals[row.rank - 1] || row.rank}</td>
+      <td>${esc(row.display_name)}${row.is_me ? ' <span class="pill">you</span>' : ''}<small>${esc(row.level)}</small></td>
+      <td><strong>${row.points_week}</strong></td>
+      <td>${row.tasks_week}</td>
+      <td>${row.streak ? '🔥 ' + row.streak : '–'}</td>
+    </tr>`).join('');
+  body.innerHTML = `
+    <div class="team-head">
+      <div><strong>${esc(team.name)}</strong> <span class="muted">· ${team.member_count} member${team.member_count === 1 ? '' : 's'}</span></div>
+      <div class="team-code">Invite code <code id="teamCode">${esc(team.invite_code)}</code>
+        <button type="button" class="ghost" id="teamCopy">Copy</button></div>
+    </div>
+    <table class="team-table">
+      <thead><tr><th>#</th><th>Name</th><th>Week pts</th><th>Done</th><th>Streak</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="muted">Nobody is sharing points yet.</td></tr>'}</tbody>
+    </table>
+    ${team.private_count ? `<p class="muted team-private">${team.private_count} member${team.private_count === 1 ? ' keeps' : 's keep'} points private.</p>` : ''}
+    <div class="team-foot">
+      <label class="check"><input type="checkbox" id="teamShare" ${team.i_share ? 'checked' : ''}> Show my points on the board</label>
+      <button type="button" class="ghost" id="teamLeave">Leave team</button>
+    </div>
+    <p id="teamError" class="status" role="status" aria-live="polite"></p>`;
+  document.getElementById('teamCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(team.invite_code);
+      showToast('Invite code copied.');
+    } catch {
+      showToast(`Invite code: ${team.invite_code}`);
+    }
+  });
+  document.getElementById('teamShare').addEventListener('change', async event => {
+    try {
+      const result = await teamRequest('/api/teams/me', 'PATCH', {share: event.target.checked}, 'Could not update sharing.');
+      renderTeam(result.team);
+      showToast(event.target.checked ? 'Your points are now visible to the team.' : 'Your points are now private.');
+    } catch (error) {
+      setStatus('teamError', error.message, true);
+    }
+  });
+  document.getElementById('teamLeave').addEventListener('click', async () => {
+    if (!window.confirm('Leave this team? Your points stay yours.')) return;
+    try {
+      await teamRequest('/api/teams/leave', 'POST', undefined, 'Could not leave the team.');
+      renderTeam(null);
+      showToast('You left the team.');
+    } catch (error) {
+      setStatus('teamError', error.message, true);
+    }
+  });
+}
+loadTeam();
