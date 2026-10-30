@@ -19,5 +19,9 @@ def test_domain_keywords_and_confidence():
 
 
 def test_tie_with_weak_evidence_stays_unsorted():
-    domain, confidence = detect_domain("buy a gift for the doctor")
+    domain, confidence = detect_domain("doctor flight")
     assert domain == UNSORTED and confidence == "low"
+
+
+def test_clear_winner_beats_a_weak_rival():
+    assert detect_domain("buy a gift for the doctor")[0] == "Shopping"
