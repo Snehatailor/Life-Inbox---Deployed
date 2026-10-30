@@ -633,6 +633,9 @@ a[data-view-link="calendar"] { position: relative; }
 .task-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .task-actions > button, .row-menu > summary { min-height: 36px; padding: 0 14px; font-size: 14px; }
+.task-actions > .icon-btn, .row-menu > summary.icon-btn { width: 40px; min-height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn svg { pointer-events: none; }
+.note-actions > .icon-btn { width: 40px; min-height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .task-stored { opacity: .85; }
 .snoozed-pill { background: var(--surface-2); color: var(--muted); }
 

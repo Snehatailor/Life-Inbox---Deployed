@@ -646,10 +646,10 @@ function renderNote(note) {
   actions.className = 'note-actions';
 
   if (note.item_type === 'text') {
-    const editButton = actionButton('Edit', 'secondary', () => {
+    const editButton = iconButton('edit', 'Edit', 'secondary', () => {
       showEditNote(note, root);
     });
-    const deleteButton = actionButton('Delete', 'danger', () => {
+    const deleteButton = iconButton('trash', 'Delete', 'danger', () => {
       deleteExistingNote(note, root, editButton, deleteButton);
     });
     actions.append(editButton, deleteButton);
@@ -1735,9 +1735,37 @@ function updateNavCounts() { /* counts are set by refreshAll */ }
 
 // ---------- The task row ----------
 
-function menu(label, className) {
-  const details = h('details', `row-menu ${className || ''}`.trim());
-  const summary = h('summary', 'button-like secondary', `${label} ▾`);
+const ICONS = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>'
+};
+
+function iconSvg(name) {
+  return `<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+}
+
+// A square button that shows only an icon. The words live in the tooltip and
+// the accessible name, so nothing is lost for screen readers or hover.
+function iconButton(icon, label, className, onClick) {
+  const button = h('button', `icon-btn ${className || ''}`.trim());
+  button.type = 'button';
+  button.innerHTML = iconSvg(icon);
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  if (onClick) button.addEventListener('click', onClick);
+  return button;
+}
+
+function menu(icon, label) {
+  const details = h('details', 'row-menu');
+  const summary = h('summary', 'icon-btn secondary');
+  summary.innerHTML = iconSvg(icon);
+  summary.title = label;
+  summary.setAttribute('aria-label', label);
   const pop = h('div', 'menu-pop');
   details.append(summary, pop);
   return {details, pop};
@@ -1930,11 +1958,9 @@ function renderTaskRow(task, {showSection = true} = {}) {
   meta.textContent = bits.join(' · ');
 
   const actions = h('div', 'task-actions');
-  const complete = h('button', '', 'Complete');
-  complete.type = 'button';
-  complete.addEventListener('click', () => completeTask(task, row));
+  const complete = iconButton('check', 'Complete', 'complete-btn', () => completeTask(task, row));
 
-  const snooze = menu('Snooze');
+  const snooze = menu('clock', 'Snooze');
   for (const [label, days] of SNOOZE_CHOICES) {
     snooze.pop.append(menuItem(label, () => snoozeTask(task, days, label)));
   }
@@ -1945,15 +1971,11 @@ function renderTaskRow(task, {showSection = true} = {}) {
     }));
   }
 
-  const edit = h('button', 'secondary', 'Edit');
-  edit.type = 'button';
-  edit.addEventListener('click', () => openTaskEditor(task, row));
-  const del = h('button', 'danger', 'Delete');
-  del.type = 'button';
-  del.addEventListener('click', () => deleteTask(task, row));
+  const edit = iconButton('edit', 'Edit', 'secondary', () => openTaskEditor(task, row));
+  const del = iconButton('trash', 'Delete', 'danger', () => deleteTask(task, row));
   actions.append(complete, snooze.details, edit, del);
 
-  const more = menu('More');
+  const more = menu('more', 'More actions');
   if (!task.due_on && task.suggested_due_on) {
     more.pop.append(menuItem(`Set deadline ${task.suggested_due_on}`, () => patchTask(task.id, {due_on: task.suggested_due_on}, `Deadline set for ${task.suggested_due_on}.`)));
   }
@@ -1999,21 +2021,15 @@ function renderStoredTaskRow(task, state) {
   meta.textContent = `${task.domain}${extra}`;
   const actions = h('div', 'task-actions');
   if (state === 'done') {
-    const reopen = h('button', '', 'Reopen');
-    reopen.type = 'button';
-    reopen.addEventListener('click', async () => {
+    const reopen = iconButton('undo', 'Reopen', '', async () => {
       await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to reopen.');
       showToast('Task reopened.');
       await refreshAll();
     });
-    const bin = h('button', 'secondary', 'Move to bin');
-    bin.type = 'button';
-    bin.addEventListener('click', () => binTask(task.id, row));
+    const bin = iconButton('trash', 'Move to bin', 'secondary', () => binTask(task.id, row));
     actions.append(reopen, bin);
   } else {
-    const restore = h('button', '', 'Restore');
-    restore.type = 'button';
-    restore.addEventListener('click', async () => {
+    const restore = iconButton('undo', 'Restore', '', async () => {
       try {
         await taskAction(`/api/tasks/${task.id}/restore`, undefined, 'Unable to restore.');
         showToast(task.status === 'dismissed' ? 'Task is open again.' : 'Task restored.');
