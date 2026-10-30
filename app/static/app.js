@@ -1413,6 +1413,8 @@ function announceNewTask(task) {
   showToast(`Added “${task.text}” · ${task.priority} (+${task.points_value} pts)${when}`);
 }
 
+const BRIEFING_COMMAND = /^(?:hey,?\s+)?(?:what(?:'s| is| do i have)?\b.*\b(?:due|today)\b|(?:read|give me|tell me)\b.*\b(?:briefing|agenda|tasks|due)\b|(?:daily )?briefing\??$|any(?:thing)? due\b.*)/i;
+
 function setupQuickTask() {
   const form = document.getElementById('quickTaskForm');
   const input = document.getElementById('quickTaskInput');
@@ -1423,6 +1425,11 @@ function setupQuickTask() {
   async function submit(sentence) {
     const value = sentence.trim();
     if (!value) return;
+    if (BRIEFING_COMMAND.test(value)) {
+      input.value = '';
+      speakBriefing();
+      return;
+    }
     try {
       await addQuickTask(value);
       input.value = '';
@@ -2442,6 +2449,9 @@ document.addEventListener('keydown', event => {
   if (key === 'g') {
     waitingForGoKey = true;
     goKeyTimer = setTimeout(() => { waitingForGoKey = false; }, 1200);
+  } else if (key === 'b') {
+    event.preventDefault();
+    speakBriefing();
   } else if (key === 'n') {
     event.preventDefault();
     goToViewAndFocus('today', 'noteText');
@@ -3110,3 +3120,45 @@ function renderTeam(team) {
   });
 }
 loadTeam();
+
+
+// ---- Phase 10: spoken "what's due today?" ----
+let speaking = false;
+
+async function speakBriefing() {
+  const synth = window.speechSynthesis;
+  if (speaking && synth) {
+    synth.cancel();
+    return;
+  }
+  let briefing;
+  try {
+    briefing = await fetchJson('/api/game/briefing', undefined, 'Unable to load the briefing.');
+  } catch {
+    showToast('Could not load today\'s briefing.');
+    return;
+  }
+  if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
+    showToast(briefing.text, {duration: 15000});
+    return;
+  }
+  synth.cancel();
+  const utterance = new SpeechSynthesisUtterance(briefing.text);
+  utterance.lang = navigator.language || 'en-US';
+  utterance.rate = 1;
+  const button = document.getElementById('briefingButton');
+  utterance.onstart = () => {
+    speaking = true;
+    button.textContent = '⏹ Stop reading';
+  };
+  const done = () => {
+    speaking = false;
+    button.textContent = '🗣️ What\'s due today?';
+  };
+  utterance.onend = done;
+  utterance.onerror = done;
+  showToast(briefing.text, {duration: 12000});
+  synth.speak(utterance);
+}
+
+document.getElementById('briefingButton').addEventListener('click', speakBriefing);

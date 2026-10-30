@@ -154,3 +154,14 @@ Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if over
 - [ ] Inbox Sort board: By domain / By format, format chips filter; drag a card to another domain → "Moved to X" with Undo, survives reload
 - [ ] Unsupported file (.docx) is refused with a clear message
 - [ ] Open tasks: drag onto a priority lane (points change) or onto a day in the 7-day strip (deadline changes)
+
+## Task Quest, phases 8-10
+
+- [ ] Google Calendar screen: import a calendar .ics; the line shows the number of busy blocks; "Clear imported calendar" removes them
+- [ ] On a High task with a deadline, "Find time" lists up to 3 slots (weekdays 09-18, before the deadline) that avoid imported meetings
+- [ ] Changing "Time needed" refreshes the slots; clicking a slot opens a prefilled Google event (nothing is saved until you confirm there)
+- [ ] Today: create a team (checkbox decides whether your points show), copy the invite code
+- [ ] In a second browser profile with a different Dev Login email, join with the code; both appear ranked by weekly points
+- [ ] Untick "Show my points on the board": you disappear from the rows and the others see "1 member keeps points private"
+- [ ] Leave team; the last person to leave deletes the team and its code stops working
+- [ ] "What's due today?" button, the `B` key, and typing or saying "what's due today?" in the task box read the briefing aloud (a toast shows the text if speech is unavailable); pressing again stops it

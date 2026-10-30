@@ -1000,6 +1000,22 @@ def leave_team_endpoint():
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.get("/api/game/briefing")
+def game_briefing():
+    from datetime import datetime as _dt
+
+    from app.attention.dates import configured_timezone, today_in_configured_tz
+    from app.database import game_summary_from_db
+    from app.game.briefing import build_briefing
+
+    return build_briefing(
+        list_tasks_from_db("open"),
+        game_summary_from_db(),
+        today_in_configured_tz(),
+        _dt.now(configured_timezone()).hour,
+    )
+
+
 @app.get("/api/game/today")
 def game_today():
     from app.database import game_summary_from_db

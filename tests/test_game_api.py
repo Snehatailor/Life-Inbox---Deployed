@@ -161,3 +161,12 @@ def test_imported_busy_blocks_are_avoided_and_clearable(client):
 def test_bad_calendar_files_are_rejected(client):
     bad = client.post("/api/calendar/busy/import", files={"file": ("x.ics", b"hello", "text/calendar")})
     assert bad.status_code == 400
+
+
+def test_briefing_endpoint_reads_real_tasks(client):
+    _quick(client, "Pay rent today, high priority")
+    _quick(client, f"Write report {_iso(-1)}")
+    body = client.get("/api/game/briefing").json()
+    assert body["due_today"] == 1 and body["overdue"] == 1
+    assert "Pay rent" in body["text"] and "Write report" in body["text"]
+    assert "0 of 100 points, 100 to go" in body["text"]

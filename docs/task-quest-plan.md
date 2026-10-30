@@ -14,9 +14,9 @@ Branch: `game/task-quest` (from `main` @ 6b3681d)
 | 5 Google Calendar | Done in link mode: prefilled event links and .ics. Two-way sync needs OAuth or the connector |
 | 6 Polish | Done: confetti, chime with mute, level bar, streak flame, how-it-works panel |
 | 7 Drag and drop | Done: drop anywhere, domain/format board, task lanes and day strip |
-| 8 Time slots | Not started (needs Google read access) |
-| 9 Team leaderboard | Not started |
-| 10 Spoken briefing | Not started |
+| 8 Time slots | Done: "Find time" on High tasks, using busy times from an imported .ics (no Google sign-in needed); events open in Google Calendar to confirm |
+| 9 Team leaderboard | Done: invite-code teams, opt-in weekly board, points/streak only |
+| 10 Spoken briefing | Done: button, `B` shortcut and "what's due today?" typed or spoken |
 
 ## What already exists (we build on it)
 
