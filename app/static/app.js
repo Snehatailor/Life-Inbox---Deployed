@@ -1344,8 +1344,19 @@ async function loadGame() {
     const lvl = game.level;
     document.getElementById('questLevel').textContent =
       `Lv ${lvl.number} ${lvl.title} · ${game.lifetime_points} pts`;
-    document.getElementById('questStreak').textContent =
-      game.streak ? `🔥 ${game.streak}-day streak` : 'No streak yet';
+    const fill = document.getElementById('levelFill');
+    const next = document.getElementById('levelNext');
+    if (lvl.next_at === null) {
+      fill.style.width = '100%';
+      next.textContent = 'Top level reached.';
+    } else {
+      const pct = Math.round(((game.lifetime_points - lvl.floor) / (lvl.next_at - lvl.floor)) * 100);
+      fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+      next.textContent = `${lvl.points_to_next} pts to the next level`;
+    }
+    const streakEl = document.getElementById('questStreak');
+    streakEl.textContent = game.streak ? `🔥 ${game.streak}-day streak` : 'No streak yet';
+    streakEl.classList.toggle('streak-live', game.streak > 0);
     document.getElementById('questDone').textContent =
       ` · ${game.tasks_done_today} done today`;
     const week = document.getElementById('questWeek');
@@ -1363,8 +1374,11 @@ async function loadGame() {
       pop.classList.remove('quest-pop-go');
       void pop.offsetWidth;
       pop.classList.add('quest-pop-go');
+      playChime(false);
       if (game.goal_met && lastQuestPoints < game.goal) {
         showToast('🎉 Daily goal reached: 100 points!');
+        launchConfetti();
+        playChime(true);
         document.getElementById('questCard').classList.add('quest-celebrate');
         setTimeout(() => document.getElementById('questCard').classList.remove('quest-celebrate'), 1800);
       }
@@ -2785,3 +2799,87 @@ function setupTaskDrops() {
   });
 }
 setupTaskDrops();
+
+
+// ---- Phase 6 polish: sound and confetti ----
+let soundOn = true;
+try { soundOn = localStorage.getItem('questSound') !== 'off'; } catch { /* storage unavailable */ }
+let audioContext = null;
+
+function paintSoundToggle() {
+  const button = document.getElementById('soundToggle');
+  button.textContent = soundOn ? '🔊 Sound on' : '🔇 Sound off';
+  button.setAttribute('aria-pressed', String(soundOn));
+}
+
+function playChime(big) {
+  if (!soundOn) return;
+  try {
+    audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+    const notes = big ? [523.25, 659.25, 783.99, 1046.5] : [659.25, 880];
+    notes.forEach((freq, i) => {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const start = audioContext.currentTime + i * 0.11;
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+      osc.connect(gain).connect(audioContext.destination);
+      osc.start(start);
+      osc.stop(start + 0.3);
+    });
+  } catch { /* audio is optional */ }
+}
+
+function launchConfetti() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const canvas = document.getElementById('confettiCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.display = 'block';
+  const colors = ['#2fb36d', '#3b8ea5', '#f2b134', '#e5584d', '#8e6bd8'];
+  const pieces = Array.from({length: 120}, () => ({
+    x: canvas.width / 2 + (Math.random() - 0.5) * 120,
+    y: canvas.height * 0.35,
+    vx: (Math.random() - 0.5) * 12,
+    vy: -Math.random() * 12 - 4,
+    size: 5 + Math.random() * 6,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    spin: Math.random() * Math.PI,
+    vs: (Math.random() - 0.5) * 0.4
+  }));
+  const startedAt = performance.now();
+  function frame(now) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const piece of pieces) {
+      piece.vy += 0.38;
+      piece.x += piece.vx;
+      piece.y += piece.vy;
+      piece.spin += piece.vs;
+      ctx.save();
+      ctx.translate(piece.x, piece.y);
+      ctx.rotate(piece.spin);
+      ctx.fillStyle = piece.color;
+      ctx.fillRect(-piece.size / 2, -piece.size / 4, piece.size, piece.size / 2);
+      ctx.restore();
+    }
+    if (now - startedAt < 2600) {
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.style.display = 'none';
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('soundToggle').addEventListener('click', () => {
+  soundOn = !soundOn;
+  try { localStorage.setItem('questSound', soundOn ? 'on' : 'off'); } catch { /* ignore */ }
+  paintSoundToggle();
+  if (soundOn) playChime(false);
+});
+paintSoundToggle();

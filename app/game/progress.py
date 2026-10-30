@@ -18,11 +18,13 @@ def level_for(total: int) -> dict:
     for i, (floor, _) in enumerate(LEVELS):
         if total >= floor:
             index = i
+    floor = LEVELS[index][0]
     title = LEVELS[index][1]
     next_floor = LEVELS[index + 1][0] if index + 1 < len(LEVELS) else None
     return {
         "title": title,
         "number": index + 1,
+        "floor": floor,
         "next_at": next_floor,
         "points_to_next": None if next_floor is None else next_floor - total,
     }

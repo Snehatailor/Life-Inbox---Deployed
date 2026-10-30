@@ -2,6 +2,22 @@
 
 Branch: `game/task-quest` (from `main` @ 6b3681d)
 
+## Status
+
+| Phase | State |
+|---|---|
+| 0 Foundations | Done |
+| 1 Dates and days left | Done |
+| 2 Points and daily ring | Done |
+| 3 Bin and backlog | Done |
+| 4 Voice to task | Done (browser speech or typed; server transcription needs an OpenAI key) |
+| 5 Google Calendar | Done in link mode: prefilled event links and .ics. Two-way sync needs OAuth or the connector |
+| 6 Polish | Done: confetti, chime with mute, level bar, streak flame, how-it-works panel |
+| 7 Drag and drop | Done: drop anywhere, domain/format board, task lanes and day strip |
+| 8 Time slots | Not started (needs Google read access) |
+| 9 Team leaderboard | Not started |
+| 10 Spoken briefing | Not started |
+
 ## What already exists (we build on it)
 
 - Tasks with `priority` (High/Medium/Low), `due_on`, `status`, `snoozed_until`, `reminder_at`, and complete/reopen/dismiss/snooze endpoints (`app/main.py`).

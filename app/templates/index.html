@@ -141,7 +141,22 @@
               <span id="questStreak"></span>
               <span id="questDone"></span>
             </p>
+            <div class="level-track" aria-hidden="true"><i id="levelFill"></i></div>
+            <small id="levelNext" class="muted"></small>
             <div id="questWeek" class="quest-week" aria-label="Last 7 days"></div>
+            <div class="quest-tools">
+              <button type="button" id="soundToggle" class="ghost" aria-pressed="true">🔊 Sound on</button>
+              <details class="quest-help">
+                <summary>How it works</summary>
+                <ul>
+                  <li>Finish tasks to earn points: <b>High 30</b>, <b>Medium 20</b>, <b>Low 10</b>.</li>
+                  <li>Done a day or more early: <b>+5</b>. Overdue: <b>half</b> points.</li>
+                  <li>Reach <b>100</b> points in a day to keep your 🔥 streak.</li>
+                  <li>Binned tasks keep their points. Reopening a task takes them back.</li>
+                  <li>Say or type a task, drag tasks onto a priority or a day, and drop files anywhere.</li>
+                </ul>
+              </details>
+            </div>
           </div>
         </section>
 
@@ -368,6 +383,7 @@
       </section>
 
     </main>
+    <canvas id="confettiCanvas" class="confetti-canvas" aria-hidden="true"></canvas>
     <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
       <div class="drop-overlay-box">
         <strong>Drop to save</strong>

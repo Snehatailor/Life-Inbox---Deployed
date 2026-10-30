@@ -555,3 +555,14 @@ a[data-view-link="calendar"] { position: relative; }
 .day-cell { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-radius: 9px; background: var(--surface-2); font-size: 13px; transition: all .15s ease; }
 .day-cell small { color: var(--muted); font-size: 10px; }
 .drop-hot { border-color: #2fb36d; background: #2fb36d22; transform: scale(1.04); }
+
+/* Phase 6 polish */
+.confetti-canvas { display: none; position: fixed; inset: 0; z-index: 120; pointer-events: none; }
+.level-track { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 6px 0 2px; }
+.level-track i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #3b8ea5, #2fb36d); transition: width .8s ease; }
+.streak-live { color: #f2994a; font-weight: 700; animation: flame 1.6s ease-in-out infinite; }
+@keyframes flame { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+.quest-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin-top: 10px; font-size: 13px; }
+.quest-help summary { cursor: pointer; color: var(--muted); }
+.quest-help ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .streak-live, .quest-pop-go, .quest-celebrate { animation: none; } .ring-fill, .level-track i { transition: none; } }

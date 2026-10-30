@@ -137,3 +137,20 @@ Browser procedure (temp DB only):
 
 - Point `DATABASE_URL` at a real personal inbox database
 - Commit API keys or generated `.db` files
+
+## Task Quest smoke (game/task-quest)
+
+Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if overdue. Daily goal 100.
+
+- [ ] Open tasks show a "+N pts" chip and a days-left badge (green safe, amber soon, orange due today, red overdue)
+- [ ] A task with no date offers "Set deadline <date>" (High +2d, Medium +5d, Low +10d)
+- [ ] Complete a task → Today ring and points rise, "+N" pop-up shows; reopen takes the points back; complete again awards once
+- [ ] Reaching 100 shows confetti, a toast and a chime; the ring turns green; the streak starts
+- [ ] "Sound off" mutes the chime and survives a reload; reduced-motion skips confetti
+- [ ] Completed filter: drag a task onto the bin (or "Bin it"); it appears under Backlog (bin) with points kept; Restore returns it
+- [ ] Type or say "Call the dentist on Friday, high priority" → High task with the right date
+- [ ] Google Calendar nav item shows a status dot; "Add to Google Calendar" opens a prefilled event; "Download deadlines (.ics)" imports into Google Calendar
+- [ ] Drop several files, a link and text anywhere on the page → each saved; toast lists "format → domain"
+- [ ] Inbox Sort board: By domain / By format, format chips filter; drag a card to another domain → "Moved to X" with Undo, survives reload
+- [ ] Unsupported file (.docx) is refused with a clear message
+- [ ] Open tasks: drag onto a priority lane (points change) or onto a day in the 7-day strip (deadline changes)
