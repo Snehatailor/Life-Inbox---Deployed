@@ -128,7 +128,7 @@ ul { padding-left: 22px; }
    ------------------------------------------------------------------ */
 .app-shell { display: flex; min-height: 100vh; }
 .sidebar {
-  position: sticky; top: 0; height: 100vh; box-sizing: border-box; flex: 0 0 248px;
+  position: sticky; top: 0; height: 100vh; box-sizing: border-box; flex: 0 0 var(--nav-w, 248px); width: var(--nav-w, 248px); overflow: hidden;
   display: flex; flex-direction: column; gap: 24px; padding: 24px 16px;
   background: var(--surface); border-right: 1px solid var(--border);
 }
@@ -591,3 +591,22 @@ a[data-view-link="calendar"] { position: relative; }
 .team-me td { background: #2fb36d14; }
 .team-private { margin: 8px 0 0; font-size: 12px; }
 .team-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+
+/* Resizable navigation (desktop). Below 160px it becomes an icon rail. */
+.nav-resize { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.nav-resize input[type="range"] { width: 100%; margin: 0; padding: 0; accent-color: var(--accent); cursor: ew-resize; }
+.app-shell.nav-compact .sidebar { padding: 20px 10px; align-items: stretch; }
+.app-shell.nav-compact .brand { justify-content: center; padding: 0; }
+.app-shell.nav-compact .brand-text,
+.app-shell.nav-compact .global-search,
+.app-shell.nav-compact .main-nav a > span:not(.nav-count),
+.app-shell.nav-compact .nav-resize-text,
+.app-shell.nav-compact .shortcuts-text,
+.app-shell.nav-compact .account-name { display: none; }
+.app-shell.nav-compact .main-nav a { justify-content: center; padding: 0; position: relative; }
+.app-shell.nav-compact .nav-count { position: absolute; top: 4px; right: 6px; margin: 0; min-width: 16px; padding: 0 4px; font-size: 10px; }
+.app-shell.nav-compact .gcal-dot { position: absolute; top: 6px; right: 10px; margin: 0; }
+.app-shell.nav-compact .shortcuts-button { justify-content: center; padding: 0; }
+.app-shell.nav-compact .account { padding: 8px 0; display: flex; justify-content: center; }
+.app-shell.nav-compact .account[open] { position: absolute; left: 8px; bottom: 8px; z-index: 5; width: 260px; padding: 10px 12px; background: var(--surface); box-shadow: 0 8px 24px rgba(0,0,0,.3); display: block; }
+@media (max-width: 767px) { .nav-resize { display: none; } .sidebar { width: auto; overflow: visible; } }

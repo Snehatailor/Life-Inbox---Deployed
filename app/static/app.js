@@ -3162,3 +3162,32 @@ async function speakBriefing() {
 }
 
 document.getElementById('briefingButton').addEventListener('click', speakBriefing);
+
+
+// ---- Resizable navigation ----
+const NAV_DEFAULT = 248;
+const NAV_COMPACT_BELOW = 160;
+
+function applyNavWidth(width, {save = true} = {}) {
+  const slider = document.getElementById('navWidth');
+  const clamped = Math.max(Number(slider.min), Math.min(Number(slider.max), Math.round(width)));
+  document.documentElement.style.setProperty('--nav-w', `${clamped}px`);
+  document.querySelector('.app-shell').classList.toggle('nav-compact', clamped < NAV_COMPACT_BELOW);
+  slider.value = String(clamped);
+  slider.setAttribute('aria-valuetext', clamped < NAV_COMPACT_BELOW ? 'Icons only' : `${clamped} pixels wide`);
+  if (save) {
+    try { localStorage.setItem('navWidth', String(clamped)); } catch { /* storage unavailable */ }
+  }
+}
+
+(function setupNavResize() {
+  const slider = document.getElementById('navWidth');
+  let saved = NAV_DEFAULT;
+  try {
+    const stored = Number(localStorage.getItem('navWidth'));
+    if (stored) saved = stored;
+  } catch { /* storage unavailable */ }
+  applyNavWidth(saved, {save: false});
+  slider.addEventListener('input', () => applyNavWidth(Number(slider.value)));
+  slider.addEventListener('dblclick', () => applyNavWidth(NAV_DEFAULT));
+})();

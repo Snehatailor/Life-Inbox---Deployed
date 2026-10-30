@@ -165,3 +165,5 @@ Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if over
 - [ ] Untick "Show my points on the board": you disappear from the rows and the others see "1 member keeps points private"
 - [ ] Leave team; the last person to leave deletes the team and its code stops working
 - [ ] "What's due today?" button, the `B` key, and typing or saying "what's due today?" in the task box read the briefing aloud (a toast shows the text if speech is unavailable); pressing again stops it
+
+- [ ] Desktop: the "Navigation width" slider resizes the sidebar from 96 to 360 px; below 160 px it becomes an icon-only rail (counts and the calendar dot stay visible); double-click resets to 248; the width survives a reload; the slider is hidden on phones
