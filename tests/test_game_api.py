@@ -234,3 +234,34 @@ def test_done_tasks_show_on_calendar_and_in_search_but_not_in_open_list(client):
     assert [e for e in client.get("/api/calendar/tasks").json() if e["source"] == "done"] == []
     assert client.get("/api/find?q=tax").json()["tasks"][0]["state"] == "done (binned)"
     assert client.get("/api/find?q=").json() == {"tasks": [], "items": []}
+
+
+def test_deadline_raises_an_automatic_priority_and_points_follow(client):
+    near = _quick(client, f"Prepare handout {_iso(2)}")          # no priority given -> Medium
+    far = _quick(client, f"Read the manual {_iso(4)}")
+    assert (near["base_priority"], near["priority"], near["priority_raised"]) == ("Medium", "High", True)
+    assert near["points_value"] == 30
+    assert (far["priority"], far["priority_raised"]) == ("Medium", False) and far["points_value"] == 20
+
+    done = client.post(f"/api/tasks/{near['id']}/complete").json()
+    assert done["points_awarded"] == 35  # High (30) because it was raised, +5 for finishing early
+    # completed tasks keep their level and are not raised again
+    assert done["priority_raised"] is False
+
+
+def test_overdue_tasks_land_in_high(client):
+    late = _quick(client, f"Send the form {_iso(-3)}")
+    assert late["priority"] == "High" and late["priority_raised"] is True
+    assert [t["id"] for t in client.get("/api/tasks?status=open").json() if t["priority"] == "High"] == [late["id"]]
+
+
+def test_a_priority_you_chose_is_never_raised(client):
+    spoken = _quick(client, "Water the plants today, low priority")
+    assert (spoken["priority"], spoken["priority_raised"], spoken["priority_source"]) == ("Low", False, "user")
+
+    auto = _quick(client, "Book the room today")
+    assert auto["priority"] == "High" and auto["priority_raised"]
+    pinned = client.patch(f"/api/tasks/{auto['id']}", json={"priority": "Medium"}).json()
+    assert (pinned["priority"], pinned["priority_raised"], pinned["priority_source"]) == ("Medium", False, "user")
+    levels = {t["id"]: t["priority"] for t in client.get("/api/tasks?status=open").json()}
+    assert levels == {spoken["id"]: "Low", auto["id"]: "Medium"}  # both stay where the person put them

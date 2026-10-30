@@ -83,3 +83,27 @@ def test_google_link_and_ics_escaping():
     ics = build_ics([{"id": 1, "due_on": "2026-11-05", "priority": "High", "text": "a, b; c", "points_value": 30},
                      {"id": 2, "due_on": None, "priority": "Low", "text": "skip", "points_value": 10}])
     assert r"a\, b\; c" in ics and "skip" not in ics and ics.count("BEGIN:VEVENT") == 1
+
+
+def test_priority_is_raised_by_deadline_pressure_but_never_lowered():
+    from app.game.scoring import effective_priority
+
+    eff = lambda base, due, source=None, status="open": effective_priority(base, source, due, TODAY, status)
+    # within 2 days or overdue -> High
+    assert eff("Low", "2026-10-30") == "High" and eff("Medium", "2026-11-01") == "High"
+    assert eff("Low", "2026-10-20") == "High"
+    # Low within 5 days -> Medium; Medium stays Medium until 2 days out
+    assert eff("Low", "2026-11-04") == "Medium"
+    assert eff("Medium", "2026-11-04") == "Medium"
+    # far away or undated: unchanged
+    assert eff("Low", "2026-11-20") == "Low" and eff("Low", None) == "Low"
+    # never lowers
+    assert eff("High", "2026-12-25") == "High"
+
+
+def test_a_chosen_priority_or_a_closed_task_is_never_raised():
+    from app.game.scoring import effective_priority
+
+    assert effective_priority("Low", "user", "2026-10-30", TODAY) == "Low"
+    assert effective_priority("Low", None, "2026-10-30", TODAY, status="completed") == "Low"
+    assert effective_priority("Medium", None, "2026-10-30", TODAY, status="dismissed") == "Medium"

@@ -39,6 +39,7 @@ from app.game.teams import (
     week_start,
 )
 from app.game.scoring import (
+    effective_priority,
     points_for,
     PRIORITY_POINTS,
     days_left,
@@ -257,6 +258,7 @@ class TaskRecord(Base):
     binned_at = Column(Text, nullable=True)
     domain = Column(Text, nullable=True)
     domain_source = Column(Text, nullable=True)
+    priority_source = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
@@ -1148,6 +1150,9 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         ]
         domain, _ = detect_domain(task.text, *source_texts)
         domain_source = "auto"
+    priority = effective_priority(
+        task.priority, task.priority_source, task.due_on, today, task.status
+    )
     suggested_due_on = None
     if not task.due_on:
         suggested_due_on = (
@@ -1156,17 +1161,20 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
     return {
         "id": task.id,
         "text": task.text,
-        "priority": task.priority,
+        "priority": priority,
+        "base_priority": task.priority,
+        "priority_raised": priority != task.priority,
+        "priority_source": task.priority_source,
         "days_left": days_left(task.due_on, today),
         "days_left_label": days_left_label(task.due_on, today),
         "urgency": urgency(task.due_on, today),
         "suggested_due_on": suggested_due_on,
-        "points_value": PRIORITY_POINTS.get(task.priority, 10),
+        "points_value": PRIORITY_POINTS.get(priority, 10),
         "domain": domain,
         "domain_source": domain_source,
         "google_event_url": (
             google_event_url(
-                f"[{task.priority}] {task.text}", task.due_on, "From Life Inbox"
+                f"[{priority}] {task.text}", task.due_on, "From Life Inbox"
             )
             if task.due_on
             else None
@@ -1229,7 +1237,13 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
             now = datetime.now(timezone.utc)
             today = today_in_configured_tz()
             if task_status == "completed" and task.points_awarded is None:
-                points = points_for(task.priority, task.due_on, today)
+                points = points_for(
+                    effective_priority(
+                        task.priority, task.priority_source, task.due_on, today
+                    ),
+                    task.due_on,
+                    today,
+                )
                 task.points_awarded = points
                 task.completed_at = now.isoformat()
                 session.add(
@@ -1300,6 +1314,7 @@ def create_quick_task(
     priority: str,
     due_on: Optional[str],
     due_confidence: Optional[str],
+    priority_chosen: bool = False,
 ) -> dict:
     """Create a task directly from a spoken or typed sentence (no source note)."""
     owner_id = require_owner_id()
@@ -1311,6 +1326,7 @@ def create_quick_task(
         task = TaskRecord(
             text=text,
             priority=priority,
+            priority_source="user" if priority_chosen else None,
             timing_text=due_on,
             timing_confirmed=1 if due_on else 0,
             due_on=due_on,
@@ -1357,6 +1373,7 @@ def update_task_fields(
             raise ValueError("Only open tasks can be changed")
         if priority is not None:
             task.priority = priority
+            task.priority_source = "user"
         if text is not None:
             task.text = " ".join(text.split())
         if due_on is not None:

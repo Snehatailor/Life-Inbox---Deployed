@@ -886,6 +886,7 @@ def _quick_task_from_sentence(sentence: str):
         parsed["priority"],
         parsed["due_on"],
         parsed["due_confidence"],
+        priority_chosen=parsed["priority_spoken"],
     )
 
 

@@ -662,3 +662,5 @@ a[data-view-link="calendar"] { position: relative; }
 .ai-details > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .done-entry { text-decoration: line-through; opacity: .75; cursor: grab; background: #2fb36d33; }
 .calendar-section .bin-zone { margin: 0 0 12px; }
+
+.raised-pill { background: #f2994a26; color: #f2994a; font-weight: 600; cursor: help; }

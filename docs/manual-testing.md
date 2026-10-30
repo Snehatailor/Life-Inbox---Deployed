@@ -159,3 +159,14 @@ Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if over
 - [ ] Dropping an open task on the bin is refused with a clear message
 - [ ] Sidebar search for a finished task finds it, labelled Done or Done · in Backlog, with Reopen / Restore
 - [ ] Inbox only lists items that need sorting; picking a section moves the item out and the Inbox count drops
+
+## Auto-raised priority
+
+Rule: an open task with a deadline is raised to High within 2 days (or when overdue); a Low task within 5 days is raised to Medium. It never lowers. A priority you set yourself (Edit, priority lane, or saying "high/low priority" in quick-add) is pinned and never raised.
+
+- [ ] A task due in 2 days with no stated priority appears under High with an "↑ due soon" tag, worth 30 points
+- [ ] The tag tooltip says which priority it was raised from
+- [ ] A task due in 5 days stays in its own section; "low priority" said in quick-add stays Low even when due today
+- [ ] Edit a raised task's priority to Medium: the tag disappears and it stays Medium
+- [ ] Completing a raised task awards points at the raised level
+- [ ] Leave the page open across midnight (or change the date): lists reload and tasks move up without a manual refresh

@@ -1656,6 +1656,7 @@ const openSections = new Set(['Unsorted']);
 const openPriorities = new Set(['High']);
 let refreshing = false;
 let refreshAgain = false;
+let lastRefreshDay = '';
 
 function h(tag, className, text) {
   const node = document.createElement(tag);
@@ -1708,6 +1709,7 @@ async function refreshAll() {
           ? fetchJson('/api/tasks?status=backlog', undefined, 'Unable to load backlog.')
           : Promise.resolve(null)
       ]);
+      lastRefreshDay = localIso(new Date());
       openTasksCache = open;
       sectionsData = sections;
       renderAttention(open);
@@ -1934,6 +1936,11 @@ function openTaskEditor(task, row) {
 function rowBadges(task) {
   const wrap = h('span', 'task-badges');
   wrap.append(h('span', priorityClass(task.priority), task.priority));
+  if (task.priority_raised) {
+    const raised = h('span', 'pill raised-pill', '↑ due soon');
+    raised.title = `Raised from ${task.base_priority} because the deadline is close. Edit the priority to keep it as you choose.`;
+    wrap.append(raised);
+  }
   wrap.append(h('span', 'points-chip', `+${task.points_value} pts`));
   if (task.due_on) {
     const badge = h('span', 'days-badge');
@@ -2445,10 +2452,19 @@ loadAuthUser();
 refreshAll();
 loadSearch();
 loadLatestAnalysis();
-window.setInterval(refreshDynamicDates, 60 * 1000);
+// A new day changes days-left, urgency and auto-raised priorities, so reload
+// the lists when the date rolls over (also when the tab wakes up).
+function refreshIfNewDay() {
+  if (lastRefreshDay && localIso(new Date()) !== lastRefreshDay) refreshAll();
+}
+window.setInterval(() => {
+  refreshDynamicDates();
+  refreshIfNewDay();
+}, 60 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     refreshDynamicDates();
+    refreshIfNewDay();
     loadGame();
   }
 });

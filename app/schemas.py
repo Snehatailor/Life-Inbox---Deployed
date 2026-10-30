@@ -195,6 +195,9 @@ class Task(BaseModel):
     id: int
     text: str
     priority: Priority
+    base_priority: Optional[str] = None
+    priority_raised: bool = False
+    priority_source: Optional[str] = None
     days_left: Optional[int] = None
     days_left_label: Optional[str] = None
     urgency: str = "none"
