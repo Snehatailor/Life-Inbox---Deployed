@@ -174,12 +174,8 @@
         <div class="today-grid">
           <section class="today-attention" aria-labelledby="attentionHeading">
             <h2 id="attentionHeading">Needs your attention</h2>
-            <p class="sub">Overdue, today, upcoming and unscheduled open tasks. Dates keep the original phrase and ask for confirmation when ambiguous.</p>
-            <p id="briefingStatus" class="status muted" role="status" aria-live="polite"></p>
-            <div id="briefing" class="panel">
-              <span class="muted">Open tasks with timing appear here after analysis.</span>
-            </div>
-            <div id="attention" class="dashboard"></div>
+            <p class="sub">Your open tasks by priority. Open a section to complete, snooze, edit or delete a task.</p>
+            <div id="attention" class="prio-list"></div>
           </section>
 
           <section class="today-week" aria-labelledby="weekHeading">
@@ -197,82 +193,23 @@
         <header class="view-header">
           <div>
             <h1 id="inboxHeading">Inbox</h1>
-            <p class="sub">Everything you saved. Organize the whole inbox with AI when you are ready.</p>
+            <p class="sub">New items that do not clearly belong anywhere yet. Everything sorted lives in Sections.</p>
           </div>
           <button id="analyzeButton" type="button" onclick="analyzeInbox()">Analyze Entire Inbox with AI</button>
         </header>
         <p id="analysisStatus" class="status muted" role="status" aria-live="polite"></p>
 
-        <h2>Organized dashboard</h2>
-        <p id="dashboardStatus" class="status muted" role="status" aria-live="polite"></p>
-        <div id="dashboard" class="dashboard">
-          <span class="muted">Analyze your inbox to populate topics, priorities, and related items.</span>
-        </div>
+        <div id="searchResults" class="search-results" hidden></div>
 
-        <h2>Sort board</h2>
-        <p class="sub">Drop files, links or text anywhere on the page. Drag a card to another domain to correct it.</p>
-        <div class="sort-toolbar">
-          <div class="chip-row" role="group" aria-label="Group by">
-            <button type="button" class="chip" data-sort-mode="domain" onclick="setSortMode('domain')">By domain</button>
-            <button type="button" class="chip" data-sort-mode="format" onclick="setSortMode('format')">By format</button>
+        <h2>Needs sorting <span id="trayCount" class="muted"></span></h2>
+        <div id="trayList"></div>
+
+        <details class="ai-details">
+          <summary>AI analysis details</summary>
+          <div id="aiOutput" class="panel">
+            <span class="muted">Save a few notes, then click “Analyze Entire Inbox with AI”. Saved analysis reloads on refresh and is marked stale if the inbox changes.</span>
           </div>
-          <div id="sortChips" class="chip-row" role="group" aria-label="Filter by format"></div>
-        </div>
-        <div id="sortBoard" class="sort-board"></div>
-
-        <h2>All items</h2>
-        <form id="itemSearchForm" class="search-toolbar" onsubmit="applyItemFilters(event)">
-          <label>
-            Search
-            <input id="itemSearch" type="search" maxlength="200" placeholder="Text or title" />
-          </label>
-          <label>
-            Type
-            <select id="itemTypeFilter">
-              <option value="">All</option>
-              <option value="text">Text</option>
-              <option value="url">URL</option>
-              <option value="pdf">PDF</option>
-              <option value="image">Image</option>
-              <option value="voice">Voice</option>
-            </select>
-          </label>
-          <label>
-            Category
-            <select id="categoryFilter">
-              <option value="">All</option>
-            </select>
-          </label>
-          <label>
-            Priority
-            <select id="priorityFilter">
-              <option value="">All</option>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-            </select>
-          </label>
-          <label>
-            Processing
-            <select id="processingStatusFilter">
-              <option value="">All</option>
-              <option value="ready">Ready</option>
-              <option value="processing">Processing</option>
-              <option value="failed">Failed</option>
-            </select>
-          </label>
-          <div class="search-actions">
-            <button type="submit">Search</button>
-            <button type="button" class="ghost" onclick="clearItemFilters()">Clear</button>
-          </div>
-        </form>
-        <p id="searchStatus" class="status muted" role="status" aria-live="polite"></p>
-        <div id="notesList"></div>
-
-        <h2>AI analysis details</h2>
-        <div id="aiOutput" class="panel">
-          <span class="muted">Save a few notes, then click “Analyze Entire Inbox with AI”. Saved analysis reloads on refresh and is marked stale if the inbox changes.</span>
-        </div>
+        </details>
       </section>
 
       <!-- TASKS -->
@@ -280,14 +217,12 @@
         <header class="view-header">
           <div>
             <h1 id="tasksHeading">Tasks</h1>
-            <p class="sub">Tasks found in your inbox. Complete, snooze, or send one to your calendar.</p>
+            <p class="sub">Every open task. Finished tasks appear in the Calendar and in search; deleted ones wait in Backlog.</p>
           </div>
           <div class="task-toolbar">
             <label for="taskStatusFilter">Show</label>
             <select id="taskStatusFilter" onchange="changeTaskStatusFilter()">
               <option value="open">Open</option>
-              <option value="completed">Completed</option>
-              <option value="dismissed">Dismissed</option>
               <option value="backlog">Backlog (bin)</option>
             </select>
           </div>
@@ -305,10 +240,6 @@
             <div class="lane lane-low" data-priority="Low">Low · 10 pts</div>
           </div>
           <div class="day-row" id="dayStrip" aria-label="Drop a task on a day to set its deadline"></div>
-        </div>
-        <div id="binZone" class="bin-zone" hidden aria-label="Drop completed tasks here to bin them">
-          <span class="bin-icon" aria-hidden="true">🗑️</span>
-          <span>Drop done tasks here. They leave your list but stay in Backlog.</span>
         </div>
         <div id="tasksList"></div>
 
@@ -353,6 +284,10 @@
           </div>
         </div>
         <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
+        <div id="binZone" class="bin-zone" aria-label="Drop finished tasks here to move them to the bin">
+          <span class="bin-icon" aria-hidden="true">🗑️</span>
+          <span>Drag a finished task (✓) from the calendar here. It leaves the calendar but stays in Tasks → Backlog with its points.</span>
+        </div>
         <h3 id="calendarTitle"></h3>
         <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
         <div id="calendarGrid" class="calendar-grid"></div>
@@ -389,18 +324,17 @@
         <header class="view-header">
           <div>
             <h1 id="sectionsHeading">Sections</h1>
-            <p class="sub">Topics and spaces that group your inbox items.</p>
+            <p class="sub">Every task and item, sorted by domain. Open a section to act on its tasks. Drag a task or item onto another section to move it.</p>
           </div>
         </header>
-        <form id="topicForm" class="topic-form" onsubmit="createTopic(event)">
-          <label>
-            New topic
-            <input id="topicName" maxlength="80" placeholder="e.g. Home projects" required />
-          </label>
-          <button type="submit">Add topic</button>
-        </form>
-        <p id="topicStatus" class="status muted" role="status" aria-live="polite"></p>
-        <div id="topics"></div>
+        <div class="sort-toolbar">
+          <div class="chip-row" role="group" aria-label="Group by">
+            <button type="button" class="chip" data-section-group="domain" onclick="setSectionGroup('domain')">By domain</button>
+            <button type="button" class="chip" data-section-group="format" onclick="setSectionGroup('format')">By format</button>
+          </div>
+          <div id="sortChips" class="chip-row" role="group" aria-label="Filter items by format"></div>
+        </div>
+        <div id="sectionsList"></div>
       </section>
 
     </main>
@@ -437,7 +371,6 @@
   <!-- Short confirmations ("Task completed · Undo") appear here. -->
   <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
 
-  <script src="/static/pagination_state.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

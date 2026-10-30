@@ -119,6 +119,8 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
             "completed_at",
             "points_awarded",
             "binned_at",
+            "domain",
+            "domain_source",
             "created_at",
             "updated_at",
         }

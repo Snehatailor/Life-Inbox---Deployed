@@ -200,6 +200,8 @@ class Task(BaseModel):
     urgency: str = "none"
     suggested_due_on: Optional[str] = None
     points_value: int = 10
+    domain: str = "Unsorted"
+    domain_source: str = "auto"
     google_event_url: Optional[str] = None
     completed_at: Optional[str] = None
     points_awarded: Optional[int] = None
@@ -220,6 +222,8 @@ class Task(BaseModel):
 class TaskPatch(BaseModel):
     priority: Optional[Priority] = None
     due_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    text: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    domain: Optional[str] = Field(default=None, max_length=40)
 
 
 class TeamCreate(BaseModel):

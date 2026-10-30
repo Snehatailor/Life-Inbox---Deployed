@@ -3,15 +3,6 @@ let isAnalyzingInbox = false;
 let calendarTasks = [];
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 const pendingNoteActions = new Set();
-const pendingTaskActions = new Set();
-const itemFilterFields = {
-  q: 'itemSearch',
-  item_type: 'itemTypeFilter',
-  category: 'categoryFilter',
-  priority: 'priorityFilter',
-  processing_status: 'processingStatusFilter'
-};
-
 function setStatus(elementId, message, isError = false) {
   const element = document.getElementById(elementId);
   element.textContent = message;
@@ -89,22 +80,6 @@ function showSkeleton(rootId, count = 3) {
 // Small counts next to Inbox and Tasks in the menu. Refreshed (debounced)
 // whenever either list reloads, so saves, deletes and undos all update them.
 let navCountTimer = null;
-
-function updateNavCounts() {
-  clearTimeout(navCountTimer);
-  navCountTimer = setTimeout(async () => {
-    try {
-      const [items, openTasks] = await Promise.all([
-        fetchJson('/api/items?limit=500', undefined, 'Unable to count items.'),
-        fetchJson('/api/tasks?status=open', undefined, 'Unable to count tasks.')
-      ]);
-      setNavCount('inbox', items.length >= 500 ? '500+' : items.length, 'items');
-      setNavCount('tasks', openTasks.length, 'open tasks');
-    } catch {
-      // Counts are a nicety; the lists themselves report load errors.
-    }
-  }, 300);
-}
 
 function setNavCount(view, count, noun) {
   const badge = document.querySelector(`[data-count="${view}"]`);
@@ -211,19 +186,6 @@ function refreshDynamicDates() {
   });
 }
 
-function itemFilterParams() {
-  const params = new URLSearchParams();
-  for (const [name, elementId] of Object.entries(itemFilterFields)) {
-    const value = document.getElementById(elementId).value.trim();
-    if (value) params.set(name, value);
-  }
-  return params;
-}
-
-function hasItemFilters() {
-  return itemFilterParams().size > 0;
-}
-
 // The query string last used for the lists; popstate compares against it so
 // switching screens (which also fires popstate) does not reload every list.
 let lastListQuery = window.location.search;
@@ -241,115 +203,8 @@ function updateUrl(updates) {
   lastListQuery = url.search;
 }
 
-function syncControlsFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  for (const [name, elementId] of Object.entries(itemFilterFields)) {
-    const element = document.getElementById(elementId);
-    const value = params.get(name) || '';
-    if (
-      name === 'category'
-      && value
-      && !Array.from(element.options).some(option => option.value === value)
-    ) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      element.appendChild(option);
-    }
-    element.value = value;
-  }
-  // The sidebar search mirrors the Inbox search words.
-  document.getElementById('globalSearch').value = params.get('q') || '';
-
-  const taskStatus = params.get('task_status');
-  document.getElementById('taskStatusFilter').value =
-    ['open', 'completed', 'dismissed'].includes(taskStatus)
-      ? taskStatus
-      : 'open';
-}
-
-function populateCategoryFilter(data) {
-  const select = document.getElementById('categoryFilter');
-  const selected =
-    new URLSearchParams(window.location.search).get('category')
-    || select.value;
-  const categories = Array.from(
-    new Set((data.buckets || []).map(bucket => bucket.name))
-  ).sort((first, second) => first.localeCompare(second));
-
-  select.replaceChildren();
-  const allOption = document.createElement('option');
-  allOption.value = '';
-  allOption.textContent = 'All';
-  select.appendChild(allOption);
-
-  if (selected && !categories.includes(selected)) {
-    categories.push(selected);
-    categories.sort((first, second) => first.localeCompare(second));
-  }
-  for (const category of categories) {
-    const option = document.createElement('option');
-    option.value = category;
-    option.textContent = category;
-    select.appendChild(option);
-  }
-  select.value = selected;
-}
-
-function applyItemFilters(event) {
-  event.preventDefault();
-  const values = {};
-  const params = itemFilterParams();
-  for (const name of Object.keys(itemFilterFields)) {
-    values[name] = params.get(name) || '';
-  }
-  updateUrl(values);
-  document.getElementById('globalSearch').value = values.q;
-  loadNotes();
-}
-
 // The sidebar search box: open Inbox and search all items for the words,
 // with the other filters cleared so nothing is hidden by accident.
-function searchEverything(event) {
-  event.preventDefault();
-  const input = document.getElementById('globalSearch');
-  const query = input.value.trim();
-  for (const elementId of Object.values(itemFilterFields)) {
-    document.getElementById(elementId).value = '';
-  }
-  document.getElementById('itemSearch').value = query;
-  // One history entry for screen + words. Setting location.hash separately
-  // would fire popstate and reset the filters before the search runs.
-  const url = new URL(window.location.href);
-  for (const name of Object.keys(itemFilterFields)) url.searchParams.delete(name);
-  if (query) url.searchParams.set('q', query);
-  url.hash = 'inbox';
-  window.history.pushState({}, '', url);
-  lastListQuery = url.search;
-  showView('inbox');
-  loadNotes();
-  input.blur();
-}
-
-function clearItemFilters() {
-  for (const elementId of Object.values(itemFilterFields)) {
-    document.getElementById(elementId).value = '';
-  }
-  document.getElementById('globalSearch').value = '';
-  updateUrl(
-    Object.fromEntries(
-      Object.keys(itemFilterFields).map(name => [name, ''])
-    )
-  );
-  loadNotes();
-}
-
-function changeTaskStatusFilter() {
-  const status = document.getElementById('taskStatusFilter').value;
-  updateUrl({task_status: status});
-  loadTasks();
-}
-
 async function fetchJson(url, options, friendlyError) {
   let response;
   try {
@@ -510,7 +365,6 @@ function captureResult(kind, item) {
 async function refreshAfterCapture() {
   await loadNotes('Saved, but the list could not refresh. Reload to try again.');
   await loadLatestAnalysis();
-  await loadDashboard();
   await loadCalendar();
 }
 
@@ -820,8 +674,7 @@ function renderNote(note) {
               : `${label} still failed.`
           );
           await loadLatestAnalysis();
-          await loadDashboard();
-        } catch {
+                } catch {
           setStatus('noteStatus', 'Retry failed.', true);
         }
       })
@@ -960,7 +813,6 @@ function showEditNote(note, root) {
         },
         'Unable to update note.'
       );
-      LifeInboxPagination.afterLoadedNoteUpdated(itemPagination, updatedNote);
       root.replaceWith(renderNote(updatedNote));
       setStatus('noteStatus', 'Note updated.');
       await loadLatestAnalysis();
@@ -1045,12 +897,10 @@ async function commitDelete(noteId, {keepalive = false} = {}) {
       {method: 'DELETE'},
       'Unable to delete note.'
     );
-    LifeInboxPagination.afterLoadedNoteDeleted(itemPagination, noteId);
     pending.root.remove();
     await loadLatestAnalysis();
     await loadTasks();
-    await loadDashboard();
-    await loadCalendar();
+      await loadCalendar();
   } catch {
     if (pending.root.isConnected) {
       pending.root.hidden = false;
@@ -1069,266 +919,6 @@ window.addEventListener('pagehide', () => {
     commitDelete(noteId, {keepalive: true});
   }
 });
-
-function renderTask(task) {
-  const root = document.createElement('div');
-  root.className = 'task';
-  root.dataset.taskId = String(task.id);
-
-  const text = document.createElement('strong');
-  text.textContent = task.text;
-
-  const priority = document.createElement('span');
-  priority.className = priorityClass(task.priority);
-  priority.textContent = task.priority;
-
-  const content = document.createElement('div');
-  content.append(text, priority);
-
-  const meta = document.createElement('div');
-  meta.className = 'task-meta';
-  const timingLabel = task.timing_text
-    ? ` · ${task.timing_text}${task.timing_confirmed ? ' (confirmed)' : ' (AI suggested)'}`
-    : '';
-  const sources = task.source_item_ids
-    .map(itemId => `#${itemId}`)
-    .join(', ');
-  meta.textContent = `${task.status}${timingLabel} · Sources: ${sources}`;
-  if (task.due_on) {
-    const due = document.createElement('span');
-    due.dataset.dueOn = task.due_on;
-    due.textContent = ` · ${relativeDueLabel(task.due_on)} · ${task.due_on}`;
-    meta.append(due);
-  }
-
-  const badge = document.createElement('span');
-  badge.className = 'days-badge';
-  badge.dataset.dueOn = task.due_on || '';
-  paintDaysBadge(badge);
-  if (task.due_on) priority.after(badge);
-  const worth = document.createElement('span');
-  worth.className = 'points-chip';
-  worth.textContent = `+${task.points_value} pts`;
-  priority.after(worth);
-
-  const actions = document.createElement('div');
-  actions.className = 'task-actions';
-
-  if (task.status === 'open') {
-    root.draggable = true;
-    root.classList.add('task-draggable');
-    root.addEventListener('dragstart', event => {
-      event.dataTransfer.setData('text/x-task-id', String(task.id));
-      event.dataTransfer.effectAllowed = 'move';
-      root.classList.add('task-dragging');
-    });
-    root.addEventListener('dragend', () => root.classList.remove('task-dragging'));
-    actions.append(
-      actionButton('Complete', '', () => {
-        transitionTask(task.id, 'complete', actions);
-      }),
-      actionButton('Dismiss', 'secondary', () => {
-        transitionTask(task.id, 'dismiss', actions);
-      }),
-      actionButton('Snooze 1 day', 'secondary', async () => {
-        const until = new Date();
-        until.setUTCDate(until.getUTCDate() + 1);
-        const iso = until.toISOString().slice(0, 10);
-        try {
-          await fetchJson(
-            `/api/tasks/${task.id}/snooze`,
-            {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({until: iso})
-            },
-            'Unable to snooze task.'
-          );
-          showToast(`Snoozed: back ${relativeDueLabel(iso).toLowerCase()}.`);
-          await loadTasks();
-          await loadAttention();
-          await loadCalendar();
-        } catch {
-          setStatus('taskStatus', 'Could not snooze task.', true);
-        }
-      })
-    );
-    if (task.timing_text && !task.timing_confirmed) {
-      actions.append(
-        actionButton('Confirm date', 'secondary', async () => {
-          try {
-            await fetchJson(
-              `/api/tasks/${task.id}/confirm-timing`,
-              {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({timing_text: task.timing_text})
-              },
-              'Unable to confirm timing.'
-            );
-            showToast('Date confirmed.');
-            await loadTasks();
-            await loadDashboard();
-            await loadAttention();
-            await loadCalendar();
-          } catch {
-            setStatus('taskStatus', 'Could not confirm timing.', true);
-          }
-        })
-      );
-    }
-    if (!task.due_on && task.suggested_due_on) {
-      actions.append(
-        actionButton(`Set deadline ${task.suggested_due_on}`, 'secondary', async () => {
-          try {
-            await fetchJson(
-              `/api/tasks/${task.id}/confirm-timing`,
-              {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({timing_text: task.suggested_due_on})
-              },
-              'Unable to set deadline.'
-            );
-            showToast(`Deadline set for ${task.suggested_due_on}.`);
-            await loadTasks();
-            await loadAttention();
-            await loadCalendar();
-          } catch {
-            setStatus('taskStatus', 'Could not set deadline.', true);
-          }
-        })
-      );
-    }
-    if (task.priority === 'High' && task.due_on) {
-      actions.append(
-        actionButton('Find time', 'secondary', () => toggleSlots(task, root))
-      );
-    }
-    if (task.google_event_url) {
-      actions.append(
-        actionButton('Add to Google Calendar', 'secondary', () => {
-          window.open(task.google_event_url, '_blank', 'noopener');
-        })
-      );
-    }
-    if (task.timing_confirmed && (task.due_on || task.timing_text)) {
-      actions.append(
-        actionButton('Preview calendar', 'secondary', () => {
-          previewCalendarForTask(task);
-        })
-      );
-    }
-  } else if (task.binned_at) {
-    const earned = document.createElement('span');
-    earned.textContent = ` · Completed ${(task.completed_at || '').slice(0, 10)} · +${task.points_awarded || 0} pts kept`;
-    meta.append(earned);
-    actions.append(
-      actionButton('Restore', '', async () => {
-        try {
-          await fetchJson(`/api/tasks/${task.id}/restore`, {method: 'POST'}, 'Unable to restore task.');
-          showToast('Task restored to Completed.');
-          await loadTasks();
-        } catch {
-          setStatus('taskStatus', 'Could not restore this task.', true);
-        }
-      })
-    );
-  } else {
-    if (task.status === 'completed') {
-      root.draggable = true;
-      root.classList.add('task-draggable');
-      root.addEventListener('dragstart', event => {
-        event.dataTransfer.setData('text/x-task-id', String(task.id));
-        event.dataTransfer.effectAllowed = 'move';
-        root.classList.add('task-dragging');
-      });
-      root.addEventListener('dragend', () => root.classList.remove('task-dragging'));
-      actions.append(
-        actionButton('Bin it', 'secondary', () => binTask(task.id, root))
-      );
-    }
-    actions.append(
-      actionButton('Reopen', '', () => {
-        transitionTask(task.id, 'reopen', actions);
-      })
-    );
-  }
-
-  root.append(content, meta, actions);
-  return root;
-}
-
-async function transitionTask(taskId, action, actions) {
-  if (pendingTaskActions.has(taskId)) return;
-
-  pendingTaskActions.add(taskId);
-  const buttons = actions.querySelectorAll('button');
-  buttons.forEach(button => {
-    button.disabled = true;
-  });
-  setStatus('taskStatus', '');
-
-  try {
-    await fetchJson(
-      `/api/tasks/${taskId}/${action}`,
-      {method: 'POST'},
-      'Unable to update task.'
-    );
-    // Every transition moves the task out of the current filter, so let the
-    // card strike through and fade before the list reloads.
-    const card = actions.closest('.task');
-    if (card) {
-      card.classList.add(action === 'complete' ? 'task-completing' : 'task-leaving');
-      await new Promise(resolve => setTimeout(resolve, 350));
-    }
-    const messages = {
-      complete: 'Task completed.',
-      dismiss: 'Task dismissed.',
-      reopen: 'Task reopened.'
-    };
-    showToast(
-      messages[action],
-      action === 'reopen'
-        ? {}
-        : {actionLabel: 'Undo', onAction: () => undoTaskTransition(taskId, action)}
-    );
-    await loadTasks();
-    await loadAttention();
-    await loadCalendar();
-  } catch {
-    setStatus(
-      'taskStatus',
-      'We could not update this task. Please try again.',
-      true
-    );
-    buttons.forEach(button => {
-      button.disabled = false;
-    });
-  } finally {
-    pendingTaskActions.delete(taskId);
-  }
-}
-
-async function undoTaskTransition(taskId, action) {
-  try {
-    await fetchJson(
-      `/api/tasks/${taskId}/reopen`,
-      {method: 'POST'},
-      'Unable to undo.'
-    );
-    showToast(action === 'complete' ? 'Task is open again.' : 'Task restored.');
-    await loadTasks();
-    await loadAttention();
-    await loadCalendar();
-  } catch {
-    setStatus(
-      'taskStatus',
-      `We could not undo that. Show ${action === 'complete' ? 'Completed' : 'Dismissed'} tasks and click Reopen.`,
-      true
-    );
-  }
-}
 
 let lastQuestPoints = null;
 
@@ -1511,90 +1101,6 @@ function setupQuickTask() {
 }
 setupQuickTask();
 
-async function binTask(taskId, card) {
-  try {
-    await fetchJson(`/api/tasks/${taskId}/bin`, {method: 'POST'}, 'Unable to bin task.');
-    if (card) {
-      card.classList.add('task-binned');
-      await new Promise(resolve => setTimeout(resolve, 450));
-    }
-    showToast('Binned. Find it any time in Backlog.', {
-      actionLabel: 'Undo',
-      onAction: async () => {
-        await fetchJson(`/api/tasks/${taskId}/restore`, {method: 'POST'}, 'Unable to undo.');
-        await loadTasks();
-      }
-    });
-    await loadTasks();
-  } catch {
-    setStatus('taskStatus', 'Could not bin this task.', true);
-  }
-}
-
-function setupBinZone() {
-  const zone = document.getElementById('binZone');
-  zone.addEventListener('dragover', event => {
-    event.preventDefault();
-    zone.classList.add('bin-over');
-  });
-  zone.addEventListener('dragleave', () => zone.classList.remove('bin-over'));
-  zone.addEventListener('drop', event => {
-    event.preventDefault();
-    zone.classList.remove('bin-over');
-    const id = Number(event.dataTransfer.getData('text/x-task-id'));
-    if (!id) return;
-    const card = document.querySelector(`.task[data-task-id="${id}"]`);
-    binTask(id, card);
-  });
-}
-setupBinZone();
-
-async function loadTasks() {
-  loadGame();
-  loadTeam();
-  const filter = document.getElementById('taskStatusFilter').value;
-  document.getElementById('binZone').hidden = filter !== 'completed';
-  document.getElementById('taskDrops').hidden = filter !== 'open';
-  paintDayStrip();
-  try {
-    const tasks = await fetchJson(
-      `/api/tasks?status=${encodeURIComponent(filter)}`,
-      undefined,
-      'Unable to load tasks.'
-    );
-    const root = document.getElementById('tasksList');
-    root.innerHTML = '';
-
-    if (!tasks.length) {
-      const emptyTasks = {
-        open: {
-          title: 'No open tasks',
-          text: 'Analyze your inbox to turn notes like “renew passport this week” into tasks.',
-          action: '<a class="button-link" href="#inbox">Go to Inbox</a>'
-        },
-        completed: {title: 'Nothing completed yet', text: 'Tasks you complete will be listed here.'},
-        dismissed: {title: 'No dismissed tasks', text: 'Tasks you dismiss will be listed here.'},
-        backlog: {title: 'Backlog is empty', text: 'Completed tasks you bin are kept here, with their points.'}
-      };
-      root.innerHTML = emptyStateHtml({icon: 'check', ...(emptyTasks[filter] || emptyTasks.open)});
-      updateNavCounts();
-      return true;
-    }
-
-    for (const task of tasks) {
-      root.appendChild(renderTask(task));
-    }
-    updateNavCounts();
-    return true;
-  } catch {
-    setStatus(
-      'taskStatus',
-      'We could not load tasks. Reload to try again.',
-      true
-    );
-    return false;
-  }
-}
 
 function renderAnalysis(data) {
   const root = document.getElementById('aiOutput');
@@ -1661,7 +1167,6 @@ async function loadLatestAnalysis() {
       return;
     }
 
-    populateCategoryFilter(data);
     renderAnalysis(data);
     const generatedAt = friendlyTimestamp(data.generated_at);
     setStatus(
@@ -1698,12 +1203,9 @@ async function analyzeInbox() {
       {method: 'POST'},
       'Unable to analyze inbox.'
     );
-    populateCategoryFilter(data);
     renderAnalysis(data);
     await loadTasks();
-    await loadTopics();
-    await loadDashboard();
-    await loadCalendar();
+      await loadCalendar();
     setStatus('analysisStatus', 'Analysis complete.');
   } catch {
     setStatus(
@@ -1719,242 +1221,6 @@ async function analyzeInbox() {
       'Analyzing…',
       'Analyze Entire Inbox with AI'
     );
-  }
-}
-
-const itemPagination = LifeInboxPagination.createState(
-  LifeInboxPagination.PAGE_SIZE
-);
-
-function updateLoadMoreButton(failureMessage) {
-  const existingMore = document.getElementById('loadMoreItems');
-  if (existingMore) existingMore.remove();
-  if (!itemPagination.hasMore) return;
-
-  const root = document.getElementById('notesList');
-  const more = document.createElement('button');
-  more.id = 'loadMoreItems';
-  more.type = 'button';
-  more.className = 'secondary';
-  more.textContent = itemPagination.listRequestInFlight
-    ? 'Loading…'
-    : 'Load more';
-  more.disabled = itemPagination.listRequestInFlight;
-  more.setAttribute(
-    'aria-busy',
-    String(itemPagination.listRequestInFlight)
-  );
-  more.addEventListener('click', () => {
-    if (itemPagination.listRequestInFlight) return;
-    loadNotes(failureMessage, {append: true});
-  });
-  root.appendChild(more);
-}
-
-async function loadNotes(
-  failureMessage = 'We could not load your notes. Reload to try again.',
-  {append = false} = {}
-) {
-  if (!LifeInboxPagination.beginListRequest(itemPagination)) {
-    return false;
-  }
-  loadBoard();
-
-  const params = itemFilterParams();
-  if (!append) {
-    LifeInboxPagination.resetForReload(itemPagination);
-  }
-  params.set('limit', String(itemPagination.pageSize));
-  params.set('offset', String(itemPagination.loadedOffset));
-  const filtered = [...params.keys()].some(
-    key => key !== 'limit' && key !== 'offset' && params.get(key)
-  );
-  const query = params.toString();
-
-  if (append) {
-    updateLoadMoreButton(failureMessage);
-  }
-
-  try {
-    const notes = await fetchJson(
-      `/api/items?${query}`,
-      undefined,
-      'Unable to load notes.'
-    );
-    const root = document.getElementById('notesList');
-    if (!append) {
-      root.innerHTML = '';
-    } else {
-      const existingMore = document.getElementById('loadMoreItems');
-      if (existingMore) existingMore.remove();
-    }
-
-    if (!append && !notes.length) {
-      root.innerHTML = filtered
-        ? emptyStateHtml({
-          icon: 'search',
-          title: 'No matches',
-          text: 'Try different words, or clear the filters to see everything.',
-          action: '<button type="button" class="secondary" onclick="clearItemFilters()">Clear filters</button>'
-        })
-        : emptyStateHtml({
-          icon: 'inbox',
-          title: 'Your inbox is empty',
-          text: 'Save a thought, link or file on Today and it will show up here.',
-          action: '<a class="button-link" href="#today">Capture something</a>'
-        });
-      setStatus(
-        'searchStatus',
-        filtered ? 'No results found.' : ''
-      );
-      updateNavCounts();
-      return true;
-    }
-
-    const {textNotes, hasMore} = LifeInboxPagination.applyFetchedPage(
-      itemPagination,
-      notes,
-      {append}
-    );
-
-    for (const note of textNotes) {
-      if (pendingDeletes.has(note.id)) continue;
-      root.appendChild(renderNote(note));
-    }
-
-    if (hasMore) {
-      updateLoadMoreButton(failureMessage);
-    }
-
-    updateNavCounts();
-    const loadedCount = itemPagination.loadedItems.length;
-    setStatus(
-      'searchStatus',
-      filtered
-        ? `${loadedCount}${hasMore ? '+' : ''} matching item${loadedCount === 1 ? '' : 's'}.`
-        : hasMore
-          ? `Showing ${loadedCount}+ items.`
-          : ''
-    );
-    return true;
-  } catch {
-    if (append) {
-      setStatus(
-        'noteStatus',
-        'We could not load more notes. Your current notes are still here—please try again.',
-        true
-      );
-      updateLoadMoreButton(failureMessage);
-    } else if (filtered) {
-      setStatus(
-        'searchStatus',
-        'Search failed. Please try again.',
-        true
-      );
-    } else {
-      setStatus('noteStatus', failureMessage, true);
-    }
-    return false;
-  } finally {
-    LifeInboxPagination.endListRequest(itemPagination);
-    if (itemPagination.hasMore) {
-      updateLoadMoreButton(failureMessage);
-    }
-  }
-}
-
-async function loadTopics() {
-  try {
-    const topics = await fetchJson(
-      '/api/topics',
-      undefined,
-      'Unable to load topics.'
-    );
-    const root = document.getElementById('topics');
-    root.innerHTML = '';
-    if (!topics.length) {
-      root.innerHTML = '<div class="panel muted">No topics yet.</div>';
-      return;
-    }
-    for (const topic of topics) {
-      const row = document.createElement('div');
-      row.className = 'topic';
-      row.innerHTML = `<strong>${esc(topic.name)}</strong><div class="muted">${topic.item_count} item${topic.item_count === 1 ? '' : 's'}${topic.description ? ` · ${esc(topic.description)}` : ''}</div>`;
-      root.appendChild(row);
-    }
-  } catch {
-    setStatus('topicStatus', 'We could not load topics.', true);
-  }
-}
-
-async function createTopic(event) {
-  event.preventDefault();
-  const input = document.getElementById('topicName');
-  const name = input.value.trim();
-  if (!name) return;
-  try {
-    await fetchJson(
-      '/api/topics',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name})
-      },
-      'Unable to create topic.'
-    );
-    input.value = '';
-    setStatus('topicStatus', 'Topic added.');
-    await loadTopics();
-    await loadDashboard();
-  } catch {
-    setStatus('topicStatus', 'Could not create that topic. It may already exist.', true);
-  }
-}
-
-async function loadDashboard() {
-  try {
-    const data = await fetchJson(
-      '/api/dashboard',
-      undefined,
-      'Unable to load dashboard.'
-    );
-    const root = document.getElementById('dashboard');
-    const section = (title, body) => `
-      <div class="panel">
-        <h3>${esc(title)}</h3>
-        ${body}
-      </div>
-    `;
-    const listOrEmpty = (items, render) =>
-      items && items.length
-        ? `<ul>${items.map(render).join('')}</ul>`
-        : '<p class="muted">Nothing here yet.</p>';
-
-    root.innerHTML = `
-      <div class="dashboard-grid">
-        ${section('Topics / Spaces', listOrEmpty(data.topics, t =>
-          `<li><strong>${esc(t.name)}</strong> · ${t.item_count}</li>`
-        ))}
-        ${section('High Priority', listOrEmpty(data.high_priority, item =>
-          `<li>${esc(item.effective_title || item.raw_text || ('#' + item.id))}${item.rationale ? `<div class="why">Why: ${esc(item.rationale)}</div>` : ''}</li>`
-        ))}
-        ${section('Open Tasks', listOrEmpty(data.open_tasks, task =>
-          `<li><strong>${esc(task.text)}</strong> <span class="${priorityClass(task.priority)}">${esc(task.priority)}</span>${task.timing_text ? ` · ${esc(task.timing_text)}${task.timing_confirmed ? ' (confirmed)' : ' (AI suggested)'}` : ''}</li>`
-        ))}
-        ${section('Recently Captured', listOrEmpty(data.recently_captured, item =>
-          `<li>#${item.id} · ${esc((item.raw_text || '').slice(0, 80))}</li>`
-        ))}
-        ${section('Needs Review', listOrEmpty(data.needs_review, item =>
-          `<li>#${item.id} · ${esc(item.reason || 'Review needed')}</li>`
-        ))}
-        ${section('Related Items', listOrEmpty(data.related_items, rel =>
-          `<li>#${rel.item_id_a} ↔ #${rel.item_id_b} <span class="pill">${esc(rel.relation_type)}</span></li>`
-        ))}
-      </div>
-    `;
-    setStatus('dashboardStatus', 'Dashboard updated.');
-  } catch {
-    setStatus('dashboardStatus', 'We could not load the organized dashboard.', true);
   }
 }
 
@@ -2016,66 +1282,6 @@ async function askInbox(event) {
   }
 }
 
-async function loadAttention() {
-  const briefingRoot = document.getElementById('briefing');
-  const attentionRoot = document.getElementById('attention');
-  try {
-    const [briefing, board] = await Promise.all([
-      fetchJson('/api/briefing', {}, 'Unable to load briefing.'),
-      fetchJson('/api/attention', {}, 'Unable to load attention board.')
-    ]);
-    briefingRoot.innerHTML = [
-      `<strong>Daily briefing</strong> · ${esc(briefing.reference_date)}`,
-      `<div>${esc(briefing.summary)}</div>`,
-      briefing.priority_suggestions.length
-        ? `<div class="provenance"><span class="label">Suggested focus</span>: ${
-            briefing.priority_suggestions
-              .map(item => `#${item.task_id} ${esc(item.text)} (${esc(item.reason)})`)
-              .join('; ')
-          }</div>`
-        : '<div class="muted">No timed open tasks yet.</div>'
-    ].join('');
-
-    const sections = [
-      ['overdue', 'Overdue'],
-      ['today', 'Today'],
-      ['upcoming', 'Upcoming'],
-      ['unscheduled', 'Unscheduled'],
-      ['snoozed', 'Snoozed']
-    ];
-    attentionRoot.replaceChildren();
-    for (const [key, label] of sections) {
-      const panel = document.createElement('div');
-      panel.className = 'panel';
-      const items = board[key] || [];
-      panel.innerHTML = `<strong>${esc(label)}</strong> <span class="muted">(${items.length})</span>`;
-      if (!items.length) {
-        const empty = document.createElement('div');
-        empty.className = 'muted';
-        empty.textContent = 'None';
-        panel.appendChild(empty);
-      } else {
-        for (const item of items.slice(0, 8)) {
-          const row = document.createElement('div');
-          row.className = 'task-meta';
-          const phrase = item.original_timing_phrase
-            ? ` · “${item.original_timing_phrase}”`
-            : '';
-          const due = item.normalized_due_on ? ` → ${item.normalized_due_on}` : '';
-          const conf = item.due_confidence ? ` · ${item.due_confidence}` : '';
-          const needs = item.needs_confirmation ? ' · needs confirmation' : '';
-          row.textContent = `#${item.id} ${item.text}${phrase}${due}${conf}${needs}`;
-          panel.appendChild(row);
-        }
-      }
-      attentionRoot.appendChild(panel);
-    }
-    setStatus('briefingStatus', 'Attention board updated.');
-  } catch {
-    setStatus('briefingStatus', 'Could not load attention board.', true);
-  }
-}
-
 async function previewCalendarForTask(task) {
   setStatus('calendarStatus', 'Building calendar preview…');
   try {
@@ -2120,43 +1326,6 @@ async function previewCalendarForTask(task) {
     setStatus('calendarStatus', 'Preview ready — confirm explicitly to record a mock receipt.');
   } catch (error) {
     setStatus('calendarStatus', error.message || 'Calendar preview failed.', true);
-  }
-}
-
-function renderCalendar() {
-  const title = document.getElementById('calendarTitle');
-  const grid = document.getElementById('calendarGrid');
-  if (!title || !grid) return;
-  title.textContent = new Intl.DateTimeFormat(undefined, {
-    month: 'long', year: 'numeric'
-  }).format(calendarCursor);
-  grid.replaceChildren();
-  const year = calendarCursor.getFullYear();
-  const month = calendarCursor.getMonth();
-  const first = new Date(year, month, 1);
-  const start = new Date(year, month, 1 - first.getDay());
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  for (let index = 0; index < 42; index += 1) {
-    const day = new Date(start);
-    day.setDate(start.getDate() + index);
-    const cell = document.createElement('div');
-    cell.className = 'calendar-day';
-    if (day.getMonth() !== month) cell.classList.add('muted-day');
-    if (day.getTime() === today.getTime()) cell.classList.add('today');
-    const dateLabel = document.createElement('span');
-    dateLabel.className = 'calendar-date';
-    dateLabel.textContent = String(day.getDate());
-    cell.appendChild(dateLabel);
-    const isoDate = [day.getFullYear(), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0')].join('-');
-    for (const entry of calendarTasks.filter(task => task.due_on === isoDate)) {
-      const event = document.createElement('div');
-      event.className = `calendar-entry${entry.source === 'inbox' ? ' inbox-entry' : ''}`;
-      event.title = `${entry.text} — ${entry.timing_text || entry.due_on}`;
-      event.textContent = entry.text;
-      cell.appendChild(event);
-    }
-    grid.appendChild(cell);
   }
 }
 
@@ -2237,8 +1406,7 @@ async function devLogin(event) {
     await loadNotes();
     await loadTasks();
     await loadAttention();
-    await loadDashboard();
-    await loadCalendar();
+      await loadCalendar();
   } catch {
     setStatus('authStatus', 'Sign-in failed (dev login may be disabled).', true);
   }
@@ -2253,8 +1421,7 @@ async function logoutSession() {
     await loadNotes();
     await loadTasks();
     await loadAttention();
-    await loadDashboard();
-    await loadCalendar();
+      await loadCalendar();
   } catch {
     setStatus('authStatus', 'Sign-out failed.', true);
   }
@@ -2469,21 +1636,799 @@ window.addEventListener('hashchange', () => {
   loadGame();
   loadTeam();
 });
+// ---- One connected workspace: tasks, sections, inbox tray, search, calendar ----
+// Sections are the domains. Every task and item lives in exactly one, and the
+// same task row (Complete / Snooze / Edit / Delete) is used everywhere.
+
+const FORMAT_ICONS = {
+  pdf: '📄', image: '🖼️', audio: '🎙️', link: '🔗', note: '📝',
+  spreadsheet: '📊', data: '🧩', textfile: '📃', other: '📦'
+};
+const SNOOZE_CHOICES = [['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7]];
+const PRIORITY_LEVELS = ['High', 'Medium', 'Low'];
+
+let sortOptions = {domains: [], formats: {}};
+let sectionsData = null;
+let openTasksCache = [];
+let sectionFormat = '';
+let sectionGroup = 'domain';
+const openSections = new Set(['Unsorted']);
+const openPriorities = new Set(['High']);
+let refreshing = false;
+let refreshAgain = false;
+
+function h(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function isSnoozed(task) {
+  return Boolean(task.snoozed_until) && task.snoozed_until > localIso(new Date());
+}
+
+function isoInDays(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return localIso(date);
+}
+
+function byDueThenId(a, b) {
+  const left = a.due_on || '9999-12-31';
+  const right = b.due_on || '9999-12-31';
+  return left === right ? a.id - b.id : left < right ? -1 : 1;
+}
+
+async function loadSortOptions() {
+  try {
+    sortOptions = await fetchJson('/api/sorting/options', undefined, 'Unable to load sections.');
+  } catch {
+    sortOptions = {domains: ['Unsorted'], formats: {}};
+  }
+}
+
+// Everything the screens need, fetched once and coalesced so the many
+// "reload after this change" calls cost a single round of requests.
+async function refreshAll() {
+  if (refreshing) {
+    refreshAgain = true;
+    return;
+  }
+  refreshing = true;
+  try {
+    do {
+      refreshAgain = false;
+      if (!sortOptions.domains.length) await loadSortOptions();
+      const filter = document.getElementById('taskStatusFilter').value;
+      const [open, sections, backlog] = await Promise.all([
+        fetchJson('/api/tasks?status=open', undefined, 'Unable to load tasks.'),
+        fetchJson('/api/sections', undefined, 'Unable to load sections.'),
+        filter === 'backlog'
+          ? fetchJson('/api/tasks?status=backlog', undefined, 'Unable to load backlog.')
+          : Promise.resolve(null)
+      ]);
+      openTasksCache = open;
+      sectionsData = sections;
+      renderAttention(open);
+      renderTasksScreen(filter === 'backlog' ? backlog : open, filter);
+      renderSections();
+      renderTray();
+      setNavCount('tasks', open.length, 'open tasks');
+      const unsorted = sections.sections.find(s => s.domain === 'Unsorted');
+      setNavCount('inbox', unsorted ? unsorted.item_count : 0, 'items to sort');
+    } while (refreshAgain);
+  } catch {
+    setStatus('taskStatus', 'We could not load your tasks. Reload to try again.', true);
+  } finally {
+    refreshing = false;
+  }
+  loadGame();
+  loadCalendar();
+}
+
+// Older call sites ask for one list at a time; they all mean "refresh".
+function loadTasks() { return refreshAll(); }
+function loadNotes() { return refreshAll(); }
+function loadAttention() { return refreshAll(); }
+function updateNavCounts() { /* counts are set by refreshAll */ }
+
+// ---------- The task row ----------
+
+function menu(label, className) {
+  const details = h('details', `row-menu ${className || ''}`.trim());
+  const summary = h('summary', 'button-like secondary', `${label} ▾`);
+  const pop = h('div', 'menu-pop');
+  details.append(summary, pop);
+  return {details, pop};
+}
+
+function menuItem(label, onClick) {
+  const button = h('button', 'ghost menu-item', label);
+  button.type = 'button';
+  button.addEventListener('click', event => {
+    event.target.closest('details').open = false;
+    onClick(event);
+  });
+  return button;
+}
+
+document.addEventListener('click', event => {
+  document.querySelectorAll('details.row-menu[open]').forEach(details => {
+    if (!details.contains(event.target)) details.open = false;
+  });
+});
+
+async function taskAction(path, body, failure) {
+  const options = {method: 'POST'};
+  if (body !== undefined) {
+    options.headers = {'Content-Type': 'application/json'};
+    options.body = JSON.stringify(body);
+  }
+  return fetchJson(path, options, failure);
+}
+
+async function completeTask(task, row) {
+  row.classList.add('task-completing');
+  try {
+    await taskAction(`/api/tasks/${task.id}/complete`, undefined, 'Unable to complete task.');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    showToast(`Done: ${task.text}`, {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to undo.');
+        await refreshAll();
+      }
+    });
+  } catch {
+    row.classList.remove('task-completing');
+    showToast('Could not complete that task.');
+    return;
+  }
+  await refreshAll();
+}
+
+async function deleteTask(task, row) {
+  try {
+    await taskAction(`/api/tasks/${task.id}/delete`, undefined, 'Unable to delete task.');
+    row.classList.add('task-binned');
+    await new Promise(resolve => setTimeout(resolve, 350));
+    showToast('Deleted. It stays in Backlog.', {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await taskAction(`/api/tasks/${task.id}/restore`, undefined, 'Unable to undo.');
+        await refreshAll();
+      }
+    });
+  } catch {
+    showToast('Could not delete that task.');
+    return;
+  }
+  await refreshAll();
+}
+
+async function snoozeTask(task, days, label) {
+  try {
+    await taskAction(`/api/tasks/${task.id}/snooze`, {until: isoInDays(days)}, 'Unable to snooze task.');
+    showToast(`Snoozed until ${label.toLowerCase()}.`, {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await taskAction(`/api/tasks/${task.id}/snooze`, {until: localIso(new Date())}, 'Unable to undo.');
+        await refreshAll();
+      }
+    });
+  } catch {
+    showToast('Could not snooze that task.');
+    return;
+  }
+  await refreshAll();
+}
+
+async function patchTask(taskId, body, message) {
+  try {
+    await fetchJson(
+      `/api/tasks/${taskId}`,
+      {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
+      'Unable to update task.'
+    );
+    if (message) showToast(message);
+    await refreshAll();
+  } catch {
+    showToast('Could not update that task.');
+  }
+}
+
+function openTaskEditor(task, row) {
+  const form = h('form', 'task-edit');
+  const text = h('input');
+  text.value = task.text;
+  text.maxLength = 500;
+  text.required = true;
+  text.setAttribute('aria-label', 'Task');
+  const grid = h('div', 'task-edit-grid');
+
+  const priority = h('select');
+  for (const level of PRIORITY_LEVELS) {
+    const option = h('option', '', `${level} · ${({High: 30, Medium: 20, Low: 10})[level]} pts`);
+    option.value = level;
+    option.selected = level === task.priority;
+    priority.append(option);
+  }
+  const due = h('input');
+  due.type = 'date';
+  due.value = task.due_on || '';
+  const domain = h('select');
+  const auto = h('option', '', 'Section: automatic');
+  auto.value = '';
+  domain.append(auto);
+  for (const name of sortOptions.domains.filter(d => d !== 'Unsorted')) {
+    const option = h('option', '', name);
+    option.value = name;
+    option.selected = task.domain_source === 'user' && task.domain === name;
+    domain.append(option);
+  }
+  for (const [label, control] of [['Priority', priority], ['Deadline', due], ['Section', domain]]) {
+    const wrap = h('label', '', label);
+    wrap.append(control);
+    grid.append(wrap);
+  }
+  const buttons = h('div', 'task-actions');
+  const save = h('button', '', 'Save');
+  save.type = 'submit';
+  const cancel = h('button', 'ghost', 'Cancel');
+  cancel.type = 'button';
+  cancel.addEventListener('click', () => refreshAll());
+  buttons.append(save, cancel);
+  form.append(text, grid, buttons);
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = {};
+    if (text.value.trim() !== task.text) body.text = text.value.trim();
+    if (priority.value !== task.priority) body.priority = priority.value;
+    if (due.value && due.value !== task.due_on) body.due_on = due.value;
+    const wanted = domain.value || null;
+    const current = task.domain_source === 'user' ? task.domain : null;
+    if (wanted !== current) body.domain = wanted;
+    if (!Object.keys(body).length) {
+      await refreshAll();
+      return;
+    }
+    await patchTask(task.id, body, 'Task updated.');
+  });
+
+  row.replaceChildren(form);
+  row.draggable = false;
+  text.focus();
+  text.select();
+}
+
+function rowBadges(task) {
+  const wrap = h('span', 'task-badges');
+  wrap.append(h('span', priorityClass(task.priority), task.priority));
+  wrap.append(h('span', 'points-chip', `+${task.points_value} pts`));
+  if (task.due_on) {
+    const badge = h('span', 'days-badge');
+    badge.dataset.dueOn = task.due_on;
+    paintDaysBadge(badge);
+    wrap.append(badge);
+  }
+  if (isSnoozed(task)) wrap.append(h('span', 'pill snoozed-pill', `Snoozed until ${task.snoozed_until}`));
+  return wrap;
+}
+
+function renderTaskRow(task, {showSection = true} = {}) {
+  const row = h('div', 'task');
+  row.dataset.taskId = String(task.id);
+  const head = h('div', 'task-title');
+  head.append(h('strong', '', task.text), rowBadges(task));
+  const meta = h('div', 'task-meta');
+  const bits = [];
+  if (showSection) bits.push(task.domain);
+  if (task.due_on) bits.push(`${relativeDueLabel(task.due_on)} · ${task.due_on}`);
+  else bits.push('No deadline');
+  meta.textContent = bits.join(' · ');
+
+  const actions = h('div', 'task-actions');
+  const complete = h('button', '', 'Complete');
+  complete.type = 'button';
+  complete.addEventListener('click', () => completeTask(task, row));
+
+  const snooze = menu('Snooze');
+  for (const [label, days] of SNOOZE_CHOICES) {
+    snooze.pop.append(menuItem(label, () => snoozeTask(task, days, label)));
+  }
+  if (isSnoozed(task)) {
+    snooze.pop.append(menuItem('Wake up now', async () => {
+      await taskAction(`/api/tasks/${task.id}/snooze`, {until: localIso(new Date())}, 'Unable to wake task.');
+      await refreshAll();
+    }));
+  }
+
+  const edit = h('button', 'secondary', 'Edit');
+  edit.type = 'button';
+  edit.addEventListener('click', () => openTaskEditor(task, row));
+  const del = h('button', 'danger', 'Delete');
+  del.type = 'button';
+  del.addEventListener('click', () => deleteTask(task, row));
+  actions.append(complete, snooze.details, edit, del);
+
+  const more = menu('More');
+  if (!task.due_on && task.suggested_due_on) {
+    more.pop.append(menuItem(`Set deadline ${task.suggested_due_on}`, () => patchTask(task.id, {due_on: task.suggested_due_on}, `Deadline set for ${task.suggested_due_on}.`)));
+  }
+  if (task.timing_text && !task.timing_confirmed) {
+    more.pop.append(menuItem('Confirm date', async () => {
+      await taskAction(`/api/tasks/${task.id}/confirm-timing`, {timing_text: task.timing_text}, 'Unable to confirm.');
+      showToast('Date confirmed.');
+      await refreshAll();
+    }));
+  }
+  if (task.priority === 'High' && task.due_on) {
+    more.pop.append(menuItem('Find a time', () => toggleSlots(task, row)));
+  }
+  if (task.google_event_url) {
+    more.pop.append(menuItem('Add to Google Calendar', () => window.open(task.google_event_url, '_blank', 'noopener')));
+  }
+  if (task.timing_confirmed && (task.due_on || task.timing_text)) {
+    more.pop.append(menuItem('Preview calendar export', () => previewCalendarForTask(task)));
+  }
+  if (more.pop.children.length) actions.append(more.details);
+
+  row.append(head, meta, actions);
+  row.draggable = true;
+  row.classList.add('task-draggable');
+  row.addEventListener('dragstart', event => {
+    event.dataTransfer.setData('text/x-task-id', String(task.id));
+    event.dataTransfer.effectAllowed = 'move';
+    row.classList.add('task-dragging');
+  });
+  row.addEventListener('dragend', () => row.classList.remove('task-dragging'));
+  return row;
+}
+
+// Rows for tasks that are not open: done, or deleted and waiting in Backlog.
+function renderStoredTaskRow(task, state) {
+  const row = h('div', 'task task-stored');
+  row.dataset.taskId = String(task.id);
+  const head = h('div', 'task-title');
+  const label = state === 'done' ? 'Done' : state === 'done (binned)' ? 'Done · in Backlog' : 'Deleted · in Backlog';
+  head.append(h('strong', '', task.text), h('span', priorityClass(task.priority), task.priority), h('span', 'pill', label));
+  const meta = h('div', 'task-meta');
+  const extra = task.completed_at ? ` · done ${task.completed_at.slice(0, 10)} · +${task.points_awarded || 0} pts kept` : '';
+  meta.textContent = `${task.domain}${extra}`;
+  const actions = h('div', 'task-actions');
+  if (state === 'done') {
+    const reopen = h('button', '', 'Reopen');
+    reopen.type = 'button';
+    reopen.addEventListener('click', async () => {
+      await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to reopen.');
+      showToast('Task reopened.');
+      await refreshAll();
+    });
+    const bin = h('button', 'secondary', 'Move to bin');
+    bin.type = 'button';
+    bin.addEventListener('click', () => binTask(task.id, row));
+    actions.append(reopen, bin);
+  } else {
+    const restore = h('button', '', 'Restore');
+    restore.type = 'button';
+    restore.addEventListener('click', async () => {
+      try {
+        await taskAction(`/api/tasks/${task.id}/restore`, undefined, 'Unable to restore.');
+        showToast(task.status === 'dismissed' ? 'Task is open again.' : 'Task restored.');
+        await refreshAll();
+        if (!document.getElementById('searchResults').hidden) loadSearch();
+      } catch {
+        showToast('Could not restore that task.');
+      }
+    });
+    actions.append(restore);
+  }
+  row.append(head, meta, actions);
+  return row;
+}
+
+async function binTask(taskId, card) {
+  try {
+    await taskAction(`/api/tasks/${taskId}/bin`, undefined, 'Unable to bin task.');
+    if (card) {
+      card.classList.add('task-binned');
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
+    showToast('Binned. Find it any time in Tasks → Backlog.', {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await taskAction(`/api/tasks/${taskId}/restore`, undefined, 'Unable to undo.');
+        await refreshAll();
+      }
+    });
+  } catch {
+    showToast('Only finished tasks go in the bin. Use Delete for an open task.');
+    return;
+  }
+  await refreshAll();
+}
+
+function setupBinZone() {
+  const zone = document.getElementById('binZone');
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    zone.classList.add('bin-over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('bin-over'));
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    zone.classList.remove('bin-over');
+    const id = Number(event.dataTransfer.getData('text/x-task-id'));
+    if (!id) return;
+    binTask(id, document.querySelector(`[data-task-id="${id}"]`));
+  });
+}
+setupBinZone();
+
+// ---------- Today: Needs your attention, by priority ----------
+
+function renderAttention(openTasks) {
+  const root = document.getElementById('attention');
+  root.replaceChildren();
+  const active = openTasks.filter(task => !isSnoozed(task));
+  for (const level of PRIORITY_LEVELS) {
+    const tasks = active.filter(task => task.priority === level).sort(byDueThenId);
+    const section = h('details', `prio-section prio-${level.toLowerCase()}`);
+    section.open = openPriorities.has(level);
+    section.addEventListener('toggle', () => {
+      if (section.open) openPriorities.add(level);
+      else openPriorities.delete(level);
+    });
+    const summary = h('summary');
+    summary.append(
+      h('span', 'prio-name', `${level} priority`),
+      h('span', 'prio-count', String(tasks.length)),
+      h('span', 'prio-pts muted', `+${({High: 30, Medium: 20, Low: 10})[level]} pts each`)
+    );
+    section.append(summary);
+    if (!tasks.length) {
+      section.append(h('p', 'muted prio-empty', 'Nothing here.'));
+    }
+    for (const task of tasks) section.append(renderTaskRow(task));
+    root.append(section);
+  }
+  const snoozed = openTasks.length - active.length;
+  if (snoozed) {
+    root.append(h('p', 'muted prio-snoozed', `${snoozed} snoozed task${snoozed === 1 ? '' : 's'} hidden until their date. Find them in Tasks.`));
+  }
+}
+
+// ---------- Tasks screen ----------
+
+function changeTaskStatusFilter() {
+  const status = document.getElementById('taskStatusFilter').value;
+  updateUrl({task_status: status === 'open' ? '' : status});
+  refreshAll();
+}
+
+function renderTasksScreen(tasks, filter) {
+  const root = document.getElementById('tasksList');
+  root.replaceChildren();
+  document.getElementById('taskDrops').hidden = filter !== 'open';
+  paintDayStrip();
+  if (!tasks.length) {
+    root.innerHTML = filter === 'backlog'
+      ? emptyStateHtml({icon: 'check', title: 'Backlog is empty', text: 'Finished tasks you bin, and tasks you delete, wait here with their points kept.'})
+      : emptyStateHtml({icon: 'check', title: 'No open tasks', text: 'Say or type a task above, or analyze your inbox to turn notes into tasks.', action: '<a class="button-link" href="#inbox">Go to Inbox</a>'});
+    return;
+  }
+  const sorted = filter === 'open'
+    ? [...tasks].sort((a, b) => PRIORITY_LEVELS.indexOf(a.priority) - PRIORITY_LEVELS.indexOf(b.priority) || byDueThenId(a, b))
+    : tasks;
+  for (const task of sorted) {
+    root.append(filter === 'backlog'
+      ? renderStoredTaskRow(task, task.status === 'dismissed' ? 'deleted' : 'done (binned)')
+      : renderTaskRow(task));
+  }
+}
+
+// ---------- Sections (domains): tasks and items together ----------
+
+function moveItemToDomain(itemId, domain) {
+  return moveToSection('items', itemId, domain);
+}
+
+async function moveToSection(kind, id, domain) {
+  const target = kind === 'items' ? `/api/items/${id}/domain` : `/api/tasks/${id}`;
+  try {
+    await fetchJson(
+      target,
+      {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({domain: domain === 'Unsorted' ? null : domain})},
+      'Unable to move.'
+    );
+    showToast(`Moved to ${domain}.`);
+    await refreshAll();
+  } catch {
+    showToast('Could not move that.');
+  }
+}
+
+function paintSectionChips(data) {
+  const chips = document.getElementById('sortChips');
+  chips.replaceChildren();
+  const items = data.sections.flatMap(s => s.items);
+  const make = (label, active, onClick) => {
+    const chip = h('button', `chip${active ? ' chip-on' : ''}`, label);
+    chip.type = 'button';
+    chip.addEventListener('click', onClick);
+    return chip;
+  };
+  chips.append(make(`All formats · ${items.length}`, !sectionFormat, () => { sectionFormat = ''; renderSections(); }));
+  for (const [key, name] of Object.entries(sortOptions.formats)) {
+    const count = items.filter(item => item.file_format === key).length;
+    if (!count) continue;
+    chips.append(make(`${FORMAT_ICONS[key] || ''} ${name} · ${count}`, sectionFormat === key, () => {
+      sectionFormat = sectionFormat === key ? '' : key;
+      renderSections();
+    }));
+  }
+  document.querySelectorAll('[data-section-group]').forEach(button => {
+    button.classList.toggle('chip-on', button.dataset.sectionGroup === sectionGroup);
+  });
+}
+
+function makeItemCard(item) {
+  const card = renderNote(item);
+  card.draggable = true;
+  card.dataset.itemId = String(item.id);
+  card.addEventListener('dragstart', event => {
+    event.dataTransfer.setData('text/x-item-id', String(item.id));
+    event.dataTransfer.effectAllowed = 'move';
+  });
+  const chip = h('span', 'pill format-pill', `${FORMAT_ICONS[item.file_format] || '📦'} ${sortOptions.formats[item.file_format] || item.file_format}`);
+  card.prepend(chip);
+  return card;
+}
+
+function renderSections() {
+  const root = document.getElementById('sectionsList');
+  if (!root || !sectionsData) return;
+  paintSectionChips(sectionsData);
+  root.replaceChildren();
+  const groups = sectionGroup === 'domain'
+    ? sectionsData.sections.map(s => ({
+      key: s.domain, label: s.domain, tasks: s.tasks,
+      items: s.items.filter(item => !sectionFormat || item.file_format === sectionFormat),
+      done: s.done_count
+    }))
+    : Object.entries(sortOptions.formats).map(([key, name]) => ({
+      key: `fmt-${key}`, label: `${FORMAT_ICONS[key] || ''} ${name}`, tasks: [],
+      items: sectionsData.sections.flatMap(s => s.items).filter(item => item.file_format === key),
+      done: 0
+    })).filter(group => group.items.length);
+
+  if (!groups.length) {
+    root.innerHTML = emptyStateHtml({icon: 'inbox', title: 'Nothing to show', text: 'Save a thought, link or file on Today and it will be sorted into a section.'});
+    return;
+  }
+  for (const group of groups) {
+    const details = h('details', `section-group${group.key === 'Unsorted' ? ' section-unsorted' : ''}`);
+    details.dataset.domain = group.key;
+    details.open = openSections.has(group.key);
+    details.addEventListener('toggle', () => {
+      if (details.open) openSections.add(group.key);
+      else openSections.delete(group.key);
+    });
+    const summary = h('summary');
+    const bits = [];
+    if (sectionGroup === 'domain') bits.push(`${group.tasks.length} open`);
+    bits.push(`${group.items.length} item${group.items.length === 1 ? '' : 's'}`);
+    if (group.done) bits.push(`${group.done} done`);
+    summary.append(h('span', 'section-name', group.label), h('span', 'muted section-counts', bits.join(' · ')));
+    details.append(summary);
+
+    if (group.tasks.length) {
+      details.append(h('h3', 'section-sub', 'Tasks'));
+      for (const task of [...group.tasks].sort((a, b) => PRIORITY_LEVELS.indexOf(a.priority) - PRIORITY_LEVELS.indexOf(b.priority) || byDueThenId(a, b))) {
+        details.append(renderTaskRow(task, {showSection: false}));
+      }
+    }
+    if (group.items.length) {
+      details.append(h('h3', 'section-sub', 'Items'));
+      for (const item of group.items) {
+        if (!pendingDeletes.has(item.id)) details.append(makeItemCard(item));
+      }
+    }
+    if (!group.tasks.length && !group.items.length) {
+      details.append(h('p', 'muted section-empty', 'Empty. Drag a task or item onto this section, or drop a file anywhere.'));
+    }
+    if (sectionGroup === 'domain') {
+      const accepts = event => ['text/x-item-id', 'text/x-task-id'].some(type => event.dataTransfer.types.includes(type));
+      details.addEventListener('dragover', event => {
+        if (!accepts(event)) return;
+        event.preventDefault();
+        details.classList.add('section-over');
+      });
+      details.addEventListener('dragleave', event => {
+        if (!details.contains(event.relatedTarget)) details.classList.remove('section-over');
+      });
+      details.addEventListener('drop', event => {
+        details.classList.remove('section-over');
+        const itemId = Number(event.dataTransfer.getData('text/x-item-id'));
+        const taskId = Number(event.dataTransfer.getData('text/x-task-id'));
+        if (!itemId && !taskId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (itemId) moveToSection('items', itemId, group.key);
+        else moveToSection('tasks', taskId, group.key);
+      });
+    }
+    root.append(details);
+  }
+}
+
+function setSectionGroup(mode) {
+  sectionGroup = mode;
+  renderSections();
+}
+
+// ---------- Inbox: what still needs sorting, and search ----------
+
+function renderTray() {
+  const root = document.getElementById('trayList');
+  if (!root || !sectionsData) return;
+  root.replaceChildren();
+  const unsorted = sectionsData.sections.find(s => s.domain === 'Unsorted');
+  const items = unsorted ? unsorted.items.filter(item => !pendingDeletes.has(item.id)) : [];
+  document.getElementById('trayCount').textContent = items.length ? `(${items.length})` : '';
+  if (!items.length) {
+    root.innerHTML = emptyStateHtml({icon: 'inbox', title: 'Everything is sorted', text: 'New notes, links and files land here only when they do not clearly belong in a section.'});
+    return;
+  }
+  for (const item of items) {
+    const wrap = h('div', 'tray-item');
+    wrap.append(makeItemCard(item));
+    const mover = h('label', 'tray-move', 'Move to ');
+    const select = h('select');
+    const placeholder = h('option', '', 'Choose a section…');
+    placeholder.value = '';
+    select.append(placeholder);
+    for (const name of sortOptions.domains.filter(d => d !== 'Unsorted')) {
+      const option = h('option', '', name);
+      option.value = name;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      if (select.value) moveToSection('items', item.id, select.value);
+    });
+    mover.append(select);
+    wrap.append(mover);
+    root.append(wrap);
+  }
+}
+
+function currentSearchQuery() {
+  return (new URLSearchParams(window.location.search).get('q') || '').trim();
+}
+
+async function loadSearch() {
+  const box = document.getElementById('searchResults');
+  const query = currentSearchQuery();
+  document.getElementById('globalSearch').value = query;
+  if (!query) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  box.replaceChildren(h('p', 'muted', 'Searching…'));
+  try {
+    const result = await fetchJson(`/api/find?q=${encodeURIComponent(query)}`, undefined, 'Search failed.');
+    box.replaceChildren();
+    const head = h('div', 'search-head');
+    head.append(h('h2', '', `Results for “${query}”`));
+    const clear = h('button', 'ghost', 'Clear search');
+    clear.type = 'button';
+    clear.addEventListener('click', clearSearch);
+    head.append(clear);
+    box.append(head);
+    if (!result.tasks.length && !result.items.length) {
+      box.append(h('p', 'muted', 'Nothing matches. Done and deleted tasks are searched too.'));
+      return;
+    }
+    if (result.tasks.length) {
+      box.append(h('h3', 'section-sub', `Tasks (${result.tasks.length})`));
+      for (const task of result.tasks) {
+        box.append(task.state === 'open' ? renderTaskRow(task) : renderStoredTaskRow(task, task.state));
+      }
+    }
+    if (result.items.length) {
+      box.append(h('h3', 'section-sub', `Items (${result.items.length})`));
+      for (const item of result.items) box.append(makeItemCard(item));
+    }
+  } catch {
+    box.replaceChildren(h('p', 'muted', 'Search failed. Please try again.'));
+  }
+}
+
+function clearSearch() {
+  updateUrl({q: ''});
+  document.getElementById('globalSearch').value = '';
+  loadSearch();
+}
+
+function searchEverything(event) {
+  event.preventDefault();
+  const input = document.getElementById('globalSearch');
+  const query = input.value.trim();
+  const url = new URL(window.location.href);
+  if (query) url.searchParams.set('q', query);
+  else url.searchParams.delete('q');
+  url.hash = 'inbox';
+  window.history.pushState({}, '', url);
+  lastListQuery = url.search;
+  showView('inbox');
+  loadSearch();
+  input.blur();
+}
+
+function syncControlsFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  document.getElementById('globalSearch').value = params.get('q') || '';
+  const taskStatus = params.get('task_status');
+  document.getElementById('taskStatusFilter').value = taskStatus === 'backlog' ? 'backlog' : 'open';
+}
+
+// ---------- Calendar: finished tasks live here ----------
+
+function renderCalendar() {
+  const title = document.getElementById('calendarTitle');
+  const grid = document.getElementById('calendarGrid');
+  if (!title || !grid) return;
+  title.textContent = new Intl.DateTimeFormat(undefined, {month: 'long', year: 'numeric'}).format(calendarCursor);
+  grid.replaceChildren();
+  const year = calendarCursor.getFullYear();
+  const month = calendarCursor.getMonth();
+  const first = new Date(year, month, 1);
+  const start = new Date(year, month, 1 - first.getDay());
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    const cell = h('div', 'calendar-day');
+    if (day.getMonth() !== month) cell.classList.add('muted-day');
+    if (day.getTime() === today.getTime()) cell.classList.add('today');
+    cell.append(h('span', 'calendar-date', String(day.getDate())));
+    const isoDate = localIso(day);
+    for (const entry of calendarTasks.filter(task => task.due_on === isoDate)) {
+      const event = h('div', `calendar-entry${entry.source === 'inbox' ? ' inbox-entry' : ''}${entry.source === 'done' ? ' done-entry' : ''}`);
+      if (entry.source === 'done') {
+        event.textContent = `✓ ${entry.text}`;
+        event.title = `Done: ${entry.text}${entry.points ? ` (+${entry.points} pts)` : ''}. Drag to the bin to move it to Backlog.`;
+        event.draggable = true;
+        event.dataset.taskId = String(entry.task_id);
+        event.addEventListener('dragstart', dragEvent => {
+          dragEvent.dataTransfer.setData('text/x-task-id', String(entry.task_id));
+          dragEvent.dataTransfer.effectAllowed = 'move';
+        });
+      } else {
+        event.textContent = entry.text;
+        event.title = `${entry.text} — ${entry.timing_text || entry.due_on}`;
+      }
+      cell.append(event);
+    }
+    grid.append(cell);
+  }
+}
+
 routeFromHash();
 renderGreeting();
 setUpCaptureBox();
-showSkeleton('notesList');
 showSkeleton('tasksList', 2);
 
 syncControlsFromUrl();
 loadAuthUser();
-loadNotes();
+refreshAll();
+loadSearch();
 loadLatestAnalysis();
-loadTasks();
-loadTopics();
-loadDashboard();
-loadAttention();
-loadCalendar();
 window.setInterval(refreshDynamicDates, 60 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
@@ -2503,167 +2448,6 @@ window.addEventListener('popstate', () => {
 
 
 // ---- Drop anywhere + sort board (by domain / by format) ----
-const FORMAT_ICONS = {
-  pdf: '📄', image: '🖼️', audio: '🎙️', link: '🔗', note: '📝',
-  spreadsheet: '📊', data: '🧩', textfile: '📃', other: '📦'
-};
-let sortOptions = {domains: [], formats: {}};
-let sortMode = 'domain';
-let sortFormatFilter = '';
-let sortItems = [];
-let boardLoading = false;
-
-async function loadSortOptions() {
-  try {
-    sortOptions = await fetchJson('/api/sorting/options', undefined, 'Unable to load sort options.');
-  } catch {
-    sortOptions = {domains: ['Unsorted'], formats: {}};
-  }
-}
-
-async function loadBoard() {
-  if (boardLoading) return;
-  boardLoading = true;
-  try {
-    if (!sortOptions.domains.length) await loadSortOptions();
-    sortItems = await fetchJson('/api/items?limit=500', undefined, 'Unable to load the board.');
-    renderBoard();
-  } catch {
-    document.getElementById('sortBoard').textContent = 'Could not load the board.';
-  } finally {
-    boardLoading = false;
-  }
-}
-
-function renderBoard() {
-  const board = document.getElementById('sortBoard');
-  const chips = document.getElementById('sortChips');
-  const formats = sortOptions.formats || {};
-  const present = new Set(sortItems.map(item => item.file_format));
-
-  chips.replaceChildren();
-  const all = document.createElement('button');
-  all.type = 'button';
-  all.className = `chip${sortFormatFilter ? '' : ' chip-on'}`;
-  all.textContent = `All formats · ${sortItems.length}`;
-  all.addEventListener('click', () => { sortFormatFilter = ''; renderBoard(); });
-  chips.append(all);
-  for (const key of Object.keys(formats)) {
-    if (!present.has(key)) continue;
-    const count = sortItems.filter(item => item.file_format === key).length;
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = `chip${sortFormatFilter === key ? ' chip-on' : ''}`;
-    chip.textContent = `${FORMAT_ICONS[key] || ''} ${formats[key]} · ${count}`;
-    chip.addEventListener('click', () => { sortFormatFilter = sortFormatFilter === key ? '' : key; renderBoard(); });
-    chips.append(chip);
-  }
-
-  document.querySelectorAll('[data-sort-mode]').forEach(button => {
-    button.classList.toggle('chip-on', button.dataset.sortMode === sortMode);
-  });
-
-  const visible = sortItems.filter(item => !sortFormatFilter || item.file_format === sortFormatFilter);
-  const columns = sortMode === 'domain'
-    ? sortOptions.domains
-    : Object.keys(formats);
-  const keyOf = item => (sortMode === 'domain' ? item.domain : item.file_format);
-
-  board.replaceChildren();
-  if (!sortItems.length) {
-    board.innerHTML = '<p class="muted">Nothing to sort yet. Drop files, links or text anywhere on the page.</p>';
-    return;
-  }
-  for (const column of columns) {
-    const cards = visible.filter(item => keyOf(item) === column);
-    if (sortMode === 'format' && !cards.length) continue;
-    const col = document.createElement('section');
-    col.className = `board-col${column === 'Unsorted' ? ' board-col-unsorted' : ''}`;
-    col.dataset.column = column;
-    const heading = document.createElement('h3');
-    heading.textContent = `${sortMode === 'format' ? (FORMAT_ICONS[column] || '') + ' ' + (formats[column] || column) : column} · ${cards.length}`;
-    col.append(heading);
-    for (const item of cards) col.append(renderBoardCard(item));
-    if (!cards.length) {
-      const empty = document.createElement('p');
-      empty.className = 'board-empty';
-      empty.textContent = sortMode === 'domain' ? 'Drop an item here' : 'Empty';
-      col.append(empty);
-    }
-    if (sortMode === 'domain') {
-      col.addEventListener('dragover', event => {
-        if (!event.dataTransfer.types.includes('text/x-item-id')) return;
-        event.preventDefault();
-        col.classList.add('board-col-over');
-      });
-      col.addEventListener('dragleave', () => col.classList.remove('board-col-over'));
-      col.addEventListener('drop', event => {
-        col.classList.remove('board-col-over');
-        const id = Number(event.dataTransfer.getData('text/x-item-id'));
-        if (!id) return;
-        event.preventDefault();
-        event.stopPropagation();
-        moveItemToDomain(id, column);
-      });
-    }
-    board.append(col);
-  }
-}
-
-function renderBoardCard(item) {
-  const card = document.createElement('div');
-  card.className = 'board-card';
-  card.draggable = true;
-  card.dataset.itemId = String(item.id);
-  const title = item.title || item.original_filename || (item.raw_text || '').slice(0, 60) || `Item #${item.id}`;
-  const guess = item.domain_source === 'auto' && item.domain === 'Unsorted'
-    ? '<span class="pill">needs sorting</span>'
-    : item.domain_source === 'user' ? '<span class="pill">moved by you</span>' : '';
-  card.innerHTML = `<span class="board-ico">${FORMAT_ICONS[item.file_format] || '📦'}</span>`
-    + `<span class="board-title">${esc(title.length > 70 ? title.slice(0, 67) + '…' : title)}</span>`
-    + `<span class="board-sub">${esc(sortOptions.formats[item.file_format] || item.file_format)}${sortMode === 'format' ? ' · ' + esc(item.domain) : ''} ${guess}</span>`;
-  card.addEventListener('dragstart', event => {
-    event.dataTransfer.setData('text/x-item-id', String(item.id));
-    event.dataTransfer.effectAllowed = 'move';
-    card.classList.add('board-dragging');
-  });
-  card.addEventListener('dragend', () => card.classList.remove('board-dragging'));
-  return card;
-}
-
-async function moveItemToDomain(itemId, domain) {
-  const previous = sortItems.find(item => item.id === itemId);
-  try {
-    await fetchJson(
-      `/api/items/${itemId}/domain`,
-      {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({domain})
-      },
-      'Unable to move item.'
-    );
-    showToast(`Moved to ${domain}.`, previous ? {
-      actionLabel: 'Undo',
-      onAction: async () => {
-        await fetchJson(`/api/items/${itemId}/domain`, {
-          method: 'PATCH',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({domain: previous.domain_source === 'user' ? previous.domain : null})
-        }, 'Unable to undo.');
-        await loadBoard();
-      }
-    } : {});
-    await loadBoard();
-  } catch {
-    setStatus('searchStatus', 'Could not move that item.', true);
-  }
-}
-
-function setSortMode(mode) {
-  sortMode = mode;
-  renderBoard();
-}
 
 // Drop anywhere: files, links and text, several at once.
 function setupDropAnywhere() {
@@ -2732,7 +2516,6 @@ async function handleDroppedData(dataTransfer) {
     `${saved.length ? `Saved ${saved.length}: ${summary}.` : ''}${failed.length ? ` Could not save: ${failed.join(', ')}.` : ''}`.trim()
   );
   await loadNotes();
-  await loadBoard();
   updateNavCounts();
 }
 
@@ -2760,22 +2543,6 @@ function paintDayStrip() {
     cell.dataset.iso = localIso(date);
     cell.innerHTML = `<small>${offset === 0 ? 'Today' : names[date.getDay()]}</small><strong>${date.getDate()}</strong>`;
     strip.append(cell);
-  }
-}
-
-async function patchTask(taskId, body, message) {
-  try {
-    await fetchJson(
-      `/api/tasks/${taskId}`,
-      {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
-      'Unable to update task.'
-    );
-    showToast(message);
-    await loadTasks();
-    await loadAttention();
-    await loadCalendar();
-  } catch {
-    setStatus('taskStatus', 'Could not update that task.', true);
   }
 }
 

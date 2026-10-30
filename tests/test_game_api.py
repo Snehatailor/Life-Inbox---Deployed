@@ -170,3 +170,67 @@ def test_briefing_endpoint_reads_real_tasks(client):
     assert body["due_today"] == 1 and body["overdue"] == 1
     assert "Pay rent" in body["text"] and "Write report" in body["text"]
     assert "0 of 100 points, 100 to go" in body["text"]
+
+
+def test_tasks_get_a_domain_that_a_person_can_override(client):
+    task = _quick(client, "Call the dentist tomorrow")
+    assert task["domain"] == "Health" and task["domain_source"] == "auto"
+
+    moved = client.patch(f"/api/tasks/{task['id']}", json={"domain": "Work"}).json()
+    assert moved["domain"] == "Work" and moved["domain_source"] == "user"
+    cleared = client.patch(f"/api/tasks/{task['id']}", json={"domain": None}).json()
+    assert cleared["domain"] == "Health" and cleared["domain_source"] == "auto"
+    assert client.patch(f"/api/tasks/{task['id']}", json={"domain": "Nope"}).status_code == 400
+
+
+def test_edit_task_text_and_priority_together(client):
+    task = _quick(client, "Draft  the   memo")
+    body = client.patch(
+        f"/api/tasks/{task['id']}", json={"text": "  Send the final memo ", "priority": "High"}
+    ).json()
+    assert body["text"] == "Send the final memo" and body["priority"] == "High"
+    assert client.patch(f"/api/tasks/{task['id']}", json={"text": ""}).status_code == 422
+
+
+def test_delete_moves_open_task_to_backlog_and_restore_reopens_it(client):
+    task = _quick(client, "Water plants today")
+    deleted = client.post(f"/api/tasks/{task['id']}/delete").json()
+    assert deleted["status"] == "dismissed" and deleted["binned_at"]
+    assert client.get("/api/tasks?status=open").json() == []
+    assert [t["id"] for t in client.get("/api/tasks?status=backlog").json()] == [task["id"]]
+    assert client.post(f"/api/tasks/{task['id']}/delete").status_code == 409  # already deleted
+
+    restored = client.post(f"/api/tasks/{task['id']}/restore").json()
+    assert restored["status"] == "open" and restored["binned_at"] is None
+    assert [t["id"] for t in client.get("/api/tasks?status=open").json()] == [task["id"]]
+
+
+def test_sections_group_tasks_and_items_by_domain(client):
+    _quick(client, "Call the dentist tomorrow")
+    done = _quick(client, "Pay the rent bill today")
+    client.post(f"/api/tasks/{done['id']}/complete")
+    client.post("/api/items", json={"raw_text": "Flight and hotel booking for the trip"})
+
+    sections = {s["domain"]: s for s in client.get("/api/sections").json()["sections"]}
+    assert [t["text"] for t in sections["Health"]["tasks"]] == ["Call the dentist"]
+    assert sections["Finance"]["tasks"] == [] and sections["Finance"]["done_count"] == 1
+    assert sections["Travel"]["item_count"] == 1
+    assert list(sections)[-1] == "Unsorted"
+
+
+def test_done_tasks_show_on_calendar_and_in_search_but_not_in_open_list(client):
+    task = _quick(client, "Submit the tax return today, high priority")
+    client.post(f"/api/tasks/{task['id']}/complete")
+
+    assert client.get("/api/tasks?status=open").json() == []
+    entries = [e for e in client.get("/api/calendar/tasks").json() if e["source"] == "done"]
+    assert len(entries) == 1 and entries[0]["text"] == "Submit the tax return"
+    assert entries[0]["points"] == 30 and entries[0]["due_on"] == _iso(0)
+
+    found = client.get("/api/find?q=tax").json()
+    assert [(t["text"], t["state"]) for t in found["tasks"]] == [("Submit the tax return", "done")]
+
+    client.post(f"/api/tasks/{task['id']}/bin")
+    assert [e for e in client.get("/api/calendar/tasks").json() if e["source"] == "done"] == []
+    assert client.get("/api/find?q=tax").json()["tasks"][0]["state"] == "done (binned)"
+    assert client.get("/api/find?q=").json() == {"tasks": [], "items": []}

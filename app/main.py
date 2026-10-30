@@ -921,12 +921,48 @@ def patch_task(task_id: int, payload: TaskPatch):
     from app.database import update_task_fields
 
     try:
-        task = update_task_fields(task_id, payload.priority, payload.due_on)
+        task = update_task_fields(
+            task_id,
+            payload.priority,
+            payload.due_on,
+            text=payload.text,
+            domain=payload.domain,
+            set_domain="domain" in payload.model_fields_set,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
     return task
+
+
+@app.post("/api/tasks/{task_id}/delete", response_model=Task)
+def delete_task_endpoint(task_id: int):
+    from app.database import delete_task
+
+    try:
+        task = delete_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/api/sections")
+def get_sections():
+    from app.database import sections_from_db
+
+    return sections_from_db()
+
+
+@app.get("/api/find")
+def search_all(q: str = Query("", max_length=200)):
+    from app.database import search_everything
+
+    if not q.strip():
+        return {"tasks": [], "items": []}
+    return search_everything(q)
 
 
 @app.post("/api/tasks/{task_id}/bin", response_model=Task)
@@ -1278,6 +1314,28 @@ def calendar_tasks():
                 "timing_text": timing_phrase_from_text(text),
                 "due_on": parsed.normalized_iso,
                 "priority": None,
+            }
+        )
+    # Finished tasks live on the calendar (on the day they were done) and in
+    # search, not in the task list. Binned ones move to Backlog instead.
+    from app.attention.dates import configured_timezone
+    from datetime import datetime as _dt
+
+    tz = configured_timezone()
+    for task in list_tasks_from_db(status_filter="completed"):
+        if not task.get("completed_at"):
+            continue
+        done_on = _dt.fromisoformat(task["completed_at"]).astimezone(tz).date().isoformat()
+        tasks.append(
+            {
+                "id": f"done-{task['id']}",
+                "source": "done",
+                "task_id": task["id"],
+                "text": task["text"],
+                "timing_text": None,
+                "due_on": done_on,
+                "priority": task["priority"],
+                "points": task["points_awarded"],
             }
         )
     return sorted(tasks, key=lambda entry: (entry["due_on"], entry["id"]))

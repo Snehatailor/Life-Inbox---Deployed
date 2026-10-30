@@ -255,6 +255,8 @@ class TaskRecord(Base):
     completed_at = Column(Text, nullable=True)
     points_awarded = Column(Integer, nullable=True)
     binned_at = Column(Text, nullable=True)
+    domain = Column(Text, nullable=True)
+    domain_source = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
@@ -1133,6 +1135,19 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         .order_by(TaskSourceItemRecord.item_id.asc())
     ).all()
     today = today_in_configured_tz()
+    if task.domain and task.domain_source == "user":
+        domain, domain_source = task.domain, "user"
+    else:
+        source_texts = [
+            " ".join(filter(None, (i.title, i.raw_text)))
+            for i in (
+                session.get(InboxItemRecord, item_id)
+                for item_id in source_item_ids[:3]
+            )
+            if i is not None
+        ]
+        domain, _ = detect_domain(task.text, *source_texts)
+        domain_source = "auto"
     suggested_due_on = None
     if not task.due_on:
         suggested_due_on = (
@@ -1147,6 +1162,8 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         "urgency": urgency(task.due_on, today),
         "suggested_due_on": suggested_due_on,
         "points_value": PRIORITY_POINTS.get(task.priority, 10),
+        "domain": domain,
+        "domain_source": domain_source,
         "google_event_url": (
             google_event_url(
                 f"[{task.priority}] {task.text}", task.due_on, "From Life Inbox"
@@ -1171,7 +1188,9 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
     }
 
 
-def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
+def list_tasks_from_db(
+    status_filter: str = TASK_OPEN, search: Optional[str] = None
+) -> list[dict]:
     if status_filter not in TASK_STATUSES | {"all", "backlog"}:
         raise ValueError("Unsupported task status")
 
@@ -1188,6 +1207,10 @@ def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
             statement = statement.where(
                 TaskRecord.status == status_filter,
                 TaskRecord.binned_at.is_(None),
+            )
+        if (search or "").strip():
+            statement = statement.where(
+                TaskRecord.text.icontains(search.strip(), autoescape=True)
             )
         tasks = session.scalars(statement).all()
         return [_task_to_dict(session, task) for task in tasks]
@@ -1307,14 +1330,24 @@ def update_task_fields(
     task_id: int,
     priority: Optional[str] = None,
     due_on: Optional[str] = None,
+    text: Optional[str] = None,
+    domain: Optional[str] = None,
+    set_domain: bool = False,
 ) -> Optional[dict]:
-    """Change an open task's priority or deadline (drag between lanes/days)."""
+    """Edit an open task: wording, priority, deadline or section.
+
+    `domain=None` with `set_domain=True` clears a person's choice back to auto.
+    """
     if priority is not None and priority not in PRIORITY_POINTS:
         raise ValueError("Unknown priority")
     if due_on is not None:
         from datetime import date as _date
 
         _date.fromisoformat(due_on)
+    if text is not None and not text.strip():
+        raise ValueError("A task needs some words")
+    if set_domain and domain not in (None, UNSORTED) and domain not in DOMAINS:
+        raise ValueError("Unknown domain")
     owner_id = require_owner_id()
     with SessionLocal() as session:
         task = _owned_task(session, task_id, owner_id)
@@ -1324,11 +1357,18 @@ def update_task_fields(
             raise ValueError("Only open tasks can be changed")
         if priority is not None:
             task.priority = priority
+        if text is not None:
+            task.text = " ".join(text.split())
         if due_on is not None:
             task.due_on = due_on
             task.timing_text = due_on
             task.timing_confirmed = 1
             task.due_confidence = "high"
+        if set_domain:
+            if domain in (None, UNSORTED):
+                task.domain, task.domain_source = None, None
+            else:
+                task.domain, task.domain_source = domain, "user"
         task.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
         return _task_to_dict(session, task)
@@ -1523,22 +1563,87 @@ def team_summary_from_db() -> dict:
 
 
 def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:
-    """Move a completed task to the bin (backlog) or restore it.
+    """Move a done or deleted task to the bin (Backlog), or restore it.
 
-    Binning never changes status or points, so the daily total is unchanged.
+    Binning never changes points. Restoring a deleted task reopens it.
     """
     owner_id = require_owner_id()
     with SessionLocal() as session:
         task = _owned_task(session, task_id, owner_id)
         if task is None:
             return None
-        if binned and task.status != TASK_COMPLETED:
-            raise ValueError("Only completed tasks can be binned")
+        if binned and task.status == TASK_OPEN:
+            raise ValueError("Only completed or deleted tasks can be binned")
         now = datetime.now(timezone.utc).isoformat()
         task.binned_at = now if binned else None
+        if not binned and task.status == TASK_DISMISSED:
+            task.status = TASK_OPEN
         task.updated_at = now
         session.commit()
         return _task_to_dict(session, task)
+
+
+def delete_task(task_id: int) -> Optional[dict]:
+    """Delete an open task: it leaves every list and waits in Backlog."""
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be deleted")
+        now = datetime.now(timezone.utc).isoformat()
+        task.status = TASK_DISMISSED
+        task.binned_at = now
+        task.updated_at = now
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def sections_from_db() -> dict:
+    """Every domain with its open tasks and items: the one connected view."""
+    tasks = [
+        t
+        for t in list_tasks_from_db(TASK_OPEN)
+        if not (t["snoozed_until"] and t["snoozed_until"] > today_in_configured_tz().isoformat())
+    ]
+    snoozed = [
+        t
+        for t in list_tasks_from_db(TASK_OPEN)
+        if t["snoozed_until"] and t["snoozed_until"] > today_in_configured_tz().isoformat()
+    ]
+    done_by_domain: dict[str, int] = {}
+    for t in list_tasks_from_db(TASK_COMPLETED):
+        done_by_domain[t["domain"]] = done_by_domain.get(t["domain"], 0) + 1
+    items = list_items_from_db(limit=500)
+    sections = []
+    for name in DOMAINS + [UNSORTED]:
+        s_tasks = [t for t in tasks if t["domain"] == name]
+        s_items = [i for i in items if i["domain"] == name]
+        sections.append(
+            {
+                "domain": name,
+                "tasks": s_tasks,
+                "items": s_items,
+                "open_count": len(s_tasks),
+                "item_count": len(s_items),
+                "done_count": done_by_domain.get(name, 0),
+            }
+        )
+    return {"sections": sections, "snoozed_count": len(snoozed)}
+
+
+def search_everything(query: str) -> dict:
+    """Tasks (any state, including done and deleted) and items matching words."""
+    tasks = list_tasks_from_db("all", search=query)
+    for task in tasks:
+        if task["binned_at"]:
+            task["state"] = "deleted" if task["status"] == TASK_DISMISSED else "done (binned)"
+        elif task["status"] == TASK_COMPLETED:
+            task["state"] = "done"
+        else:
+            task["state"] = "open"
+    return {"tasks": tasks, "items": list_items_from_db(search=query, limit=50)}
 
 
 def game_summary_from_db() -> dict:

@@ -14,26 +14,26 @@ Open http://127.0.0.1:8000
 ## Core smoke (Milestone 1+)
 
 - [ ] Home page loads with capture box, analyze button, tasks, notes
-- [ ] Save a note → appears under Raw saved notes
+- [ ] Save a note → it is sorted into a section (Sections screen) or waits under Inbox → Needs sorting
 - [ ] Edit a note → text updates; analysis status becomes stale if prior analysis existed
 - [ ] Delete a note → removed; linked orphan task disappears after analyze+delete
 - [ ] Analyze Entire Inbox → buckets, todos, priority view, mode shown
 - [ ] Reload page → latest analysis restored; tasks persist
 - [ ] Complete / dismiss / reopen a task; filter by status
 - [ ] Re-analyze after completing a task → task status unchanged
-- [ ] Search/filter notes; Clear resets filters
-- [ ] With >100 notes, “Load more” appears and appends
+- [ ] Sidebar search finds notes and tasks (including done and deleted ones); Clear search hides the results
+- [ ] With many notes, every section lists its items (up to 500 are loaded)
 - [ ] After editing inbox post-analysis, stale banner / status appears
 - [ ] Invalid empty note rejected with friendly status
 - [ ] `/api/health` returns `{"status":"ok"}`
 
 ## Organization smoke (Milestone 2+)
 
-- [ ] Dashboard shows Topics, High Priority, Open Tasks, Recently Captured, Needs Review, Related
-- [ ] Add a custom topic from the Topics form
+- [ ] Sections lists Work, Finance, Health, Study, Home, Travel, Shopping, Social and Unsorted with open / item / done counts
+- [ ] Drag a task or item onto another section; it stays there after reload
 - [ ] Multi-action note creates multiple tasks from one source
 - [ ] Confirm date on a task → labeled confirmed; survives re-analyze
-- [ ] Near-duplicate notes appear under Related Items; dismiss removes them from the active list
+- [ ] (Related-items panel was retired; `/api/relations` still works)
 - [ ] `PATCH /api/items/{id}/insight` user title/topic/priority survives re-analysis
 
 ## Ask My Inbox smoke (Milestone 4+)
@@ -103,29 +103,10 @@ Turn Dev Login on first (`LIFE_INBOX_ALLOW_DEV_LOGIN=true` in the server termina
 - [ ] After analysis, Attention section shows Today / Upcoming / Overdue / Unscheduled
 - [ ] Daily briefing summary and suggested focus appear
 - [ ] Confirm date on a timed task; original phrase preserved; due_on normalized
-- [ ] Snooze 1 day moves task into Snoozed bucket
+- [ ] Snooze (Tomorrow / In 3 days / Next week) hides the task from Today's priority sections and shows “N snoozed”
 - [ ] Preview calendar shows provider notes and requires explicit confirm
 - [ ] Confirm (mock) records a local receipt; `/api/calendar/status` shows writes_enabled=false
 - [ ] With `LIFE_INBOX_CALENDAR_PROVIDER=google`, confirm returns blocked (no OAuth/writes)
-
-## Pagination regression (delete + Load more)
-
-Automated coverage: `tests/test_pagination_state.py` (pure JS helper via Node).
-
-Browser procedure (temp DB only):
-
-1. Create notes “Pagination note 001” … “Pagination note 102” (102 notes).
-2. Reload http://127.0.0.1:8000 — first 100 appear; “Load more” visible.
-3. Delete “Pagination note 001”.
-4. Click “Load more”.
-5. Confirm notes 002–102 each appear exactly once (including 101); ID order.
-6. Rapid double-click “Load more” on a >200-note inbox — no duplicates/skips;
-   button disables while a list request is in flight.
-7. Force a failed append (stop server, click Load more) — friendly error;
-   already-displayed notes remain.
-8. Failed delete (stop server, delete) — note stays visible; pagination unchanged.
-9. Search / filters / Clear / create note / Back / Forward still reload from
-   offset 0. Editing a note does not skip or duplicate pages.
 
 ## Error states
 
@@ -167,3 +148,14 @@ Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if over
 - [ ] "What's due today?" button, the `B` key, and typing or saying "what's due today?" in the task box read the briefing aloud (a toast shows the text if speech is unavailable); pressing again stops it
 
 - [ ] Desktop: the "Navigation width" slider resizes the sidebar from 96 to 360 px; below 160 px it becomes an icon-only rail (counts and the calendar dot stay visible); double-click resets to 248; the width survives a reload; the slider is hidden on phones
+
+## Sections, task row and search (workspace restructure)
+
+- [ ] Today → Needs your attention shows High, Medium and Low sections (High open); each task has Complete, Snooze, Edit, Delete and More
+- [ ] Edit changes the wording, priority, deadline and section; the task moves to the right priority section
+- [ ] Delete moves an open task to Tasks → Backlog with an Undo toast; Restore brings it back open
+- [ ] Complete removes the task from every list and shows it ticked (✓) on the Calendar on the day it was done
+- [ ] Calendar bin: drag a ✓ task into it; it leaves the Calendar and appears in Backlog with its points kept
+- [ ] Dropping an open task on the bin is refused with a clear message
+- [ ] Sidebar search for a finished task finds it, labelled Done or Done · in Backlog, with Reopen / Restore
+- [ ] Inbox only lists items that need sorting; picking a section moves the item out and the Inbox count drops
