@@ -183,6 +183,17 @@
           <span class="muted">Analyze your inbox to populate topics, priorities, and related items.</span>
         </div>
 
+        <h2>Sort board</h2>
+        <p class="sub">Drop files, links or text anywhere on the page. Drag a card to another domain to correct it.</p>
+        <div class="sort-toolbar">
+          <div class="chip-row" role="group" aria-label="Group by">
+            <button type="button" class="chip" data-sort-mode="domain" onclick="setSortMode('domain')">By domain</button>
+            <button type="button" class="chip" data-sort-mode="format" onclick="setSortMode('format')">By format</button>
+          </div>
+          <div id="sortChips" class="chip-row" role="group" aria-label="Filter by format"></div>
+        </div>
+        <div id="sortBoard" class="sort-board"></div>
+
         <h2>All items</h2>
         <form id="itemSearchForm" class="search-toolbar" onsubmit="applyItemFilters(event)">
           <label>
@@ -261,6 +272,14 @@
           <input id="quickTaskInput" type="text" maxlength="500" placeholder="Say or type: “Call the dentist Friday, high priority”" aria-label="New task">
           <button type="submit" id="quickAdd">Add</button>
         </form>
+        <div id="taskDrops" class="task-drops" hidden>
+          <div class="lane-row" id="priorityLanes" aria-label="Drop a task on a priority">
+            <div class="lane lane-high" data-priority="High">High · 30 pts</div>
+            <div class="lane lane-medium" data-priority="Medium">Medium · 20 pts</div>
+            <div class="lane lane-low" data-priority="Low">Low · 10 pts</div>
+          </div>
+          <div class="day-row" id="dayStrip" aria-label="Drop a task on a day to set its deadline"></div>
+        </div>
         <div id="binZone" class="bin-zone" hidden aria-label="Drop completed tasks here to bin them">
           <span class="bin-icon" aria-hidden="true">🗑️</span>
           <span>Drop done tasks here. They leave your list but stay in Backlog.</span>
@@ -349,6 +368,12 @@
       </section>
 
     </main>
+    <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
+      <div class="drop-overlay-box">
+        <strong>Drop to save</strong>
+        <span>PDFs, images, audio, text/CSV/JSON files, links or text. Each is sorted by format and domain.</span>
+      </div>
+    </div>
   </div>
 
   <dialog id="shortcutsDialog" class="shortcuts-dialog" aria-labelledby="shortcutsHeading">

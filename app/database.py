@@ -30,6 +30,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.attention.dates import today_in_configured_tz
 from app.game.gcal import google_event_url
+from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
 from app.game.scoring import (
     points_for,
@@ -125,6 +126,8 @@ class InboxItemRecord(Base):
     storage_path = Column(Text, nullable=True)
     extracted_text = Column(Text, nullable=True)
     ai_description = Column(Text, nullable=True)
+    domain = Column(Text, nullable=True)
+    domain_source = Column(Text, nullable=True)
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=True)
@@ -475,7 +478,24 @@ def init_db():
 
 
 def _item_to_dict(item: InboxItemRecord) -> dict:
+    if item.domain and item.domain_source == "user":
+        domain, domain_confidence, domain_source = item.domain, "user", "user"
+    else:
+        domain, domain_confidence = detect_domain(
+            item.title,
+            item.original_filename,
+            item.source_url,
+            item.raw_text,
+            item.extracted_text,
+        )
+        domain_source = "auto"
     return {
+        "file_format": detect_format(
+            item.item_type, item.original_filename, item.mime_type
+        ),
+        "domain": domain,
+        "domain_confidence": domain_confidence,
+        "domain_source": domain_source,
         "id": item.id,
         "item_type": item.item_type,
         "title": item.title,
@@ -1172,6 +1192,44 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         return _task_to_dict(session, task)
 
 
+def set_item_domain(item_id: int, domain: Optional[str]) -> Optional[dict]:
+    """Save a person's domain choice; None/Unsorted clears it back to auto."""
+    if domain is not None and domain not in DOMAINS + [UNSORTED]:
+        raise ValueError("Unknown domain")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        item = _owned_item(session, item_id, owner_id)
+        if item is None:
+            return None
+        if domain in (None, UNSORTED):
+            item.domain, item.domain_source = None, None
+        else:
+            item.domain, item.domain_source = domain, "user"
+        item.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _item_to_dict(item)
+
+
+def add_text_file_item_to_db(
+    filename: str, mime_type: str, text: str
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        item = InboxItemRecord(
+            item_type=TEXT_ITEM_TYPE,
+            title=filename,
+            raw_text=text,
+            original_filename=filename,
+            mime_type=mime_type,
+            processing_status=READY_STATUS,
+            owner_user_id=require_owner_id(),
+            created_at=now,
+        )
+        session.add(item)
+        session.commit()
+        return _item_to_dict(item)
+
+
 def create_quick_task(
     text: str,
     priority: str,
@@ -1199,6 +1257,37 @@ def create_quick_task(
             updated_at=now,
         )
         session.add(task)
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def update_task_fields(
+    task_id: int,
+    priority: Optional[str] = None,
+    due_on: Optional[str] = None,
+) -> Optional[dict]:
+    """Change an open task's priority or deadline (drag between lanes/days)."""
+    if priority is not None and priority not in PRIORITY_POINTS:
+        raise ValueError("Unknown priority")
+    if due_on is not None:
+        from datetime import date as _date
+
+        _date.fromisoformat(due_on)
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be changed")
+        if priority is not None:
+            task.priority = priority
+        if due_on is not None:
+            task.due_on = due_on
+            task.timing_text = due_on
+            task.timing_confirmed = 1
+            task.due_confidence = "high"
+        task.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
         return _task_to_dict(session, task)
 

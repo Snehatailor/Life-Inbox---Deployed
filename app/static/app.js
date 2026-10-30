@@ -378,16 +378,17 @@ async function fetchJson(url, options, friendlyError) {
 // The text and any attached file decide which existing endpoint is used.
 // ------------------------------------------------------------------
 const CAPTURE_LABELS = {
-  note: 'Note', url: 'Link', pdf: 'PDF', image: 'Image', voice: 'Voice note'
+  note: 'Note', url: 'Link', pdf: 'PDF', image: 'Image', voice: 'Voice note', textfile: 'Text file'
 };
 const CAPTURE_PROGRESS = {
   note: 'Saving your note…',
   url: 'Saving the link and fetching the page text…',
   pdf: 'Saving PDF and extracting text…',
   image: 'Saving image and reading any text in it…',
-  voice: 'Uploading voice note…'
+  voice: 'Uploading voice note…',
+  textfile: 'Saving text file…'
 };
-const FILE_KIND_NAMES = { pdf: 'PDF', image: 'image', voice: 'audio file' };
+const FILE_KIND_NAMES = { pdf: 'PDF', image: 'image', voice: 'audio file', textfile: 'text file' };
 
 let attachedFile = null;
 
@@ -403,6 +404,7 @@ function fileKind(file) {
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
   if (type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/.test(name)) return 'image';
   if (type.startsWith('audio/') || type === 'video/webm' || /\.(webm|wav|mp3|m4a|ogg)$/.test(name)) return 'voice';
+  if (/\.(txt|md|log|csv|tsv|json|xml|ya?ml)$/.test(name)) return 'textfile';
   return null;
 }
 
@@ -445,7 +447,7 @@ function attachCaptureFile(file) {
   if (!fileKind(file)) {
     setStatus(
       'noteStatus',
-      `“${file.name}” can't be saved here. Life Inbox accepts PDFs, images and audio files.`,
+      `“${file.name}” can't be saved here. Life Inbox accepts PDFs, images, audio, and text, CSV or JSON files.`,
       true
     );
     document.getElementById('captureFile').value = '';
@@ -1113,6 +1115,14 @@ function renderTask(task) {
   actions.className = 'task-actions';
 
   if (task.status === 'open') {
+    root.draggable = true;
+    root.classList.add('task-draggable');
+    root.addEventListener('dragstart', event => {
+      event.dataTransfer.setData('text/x-task-id', String(task.id));
+      event.dataTransfer.effectAllowed = 'move';
+      root.classList.add('task-dragging');
+    });
+    root.addEventListener('dragend', () => root.classList.remove('task-dragging'));
     actions.append(
       actionButton('Complete', '', () => {
         transitionTask(task.id, 'complete', actions);
@@ -1517,6 +1527,8 @@ async function loadTasks() {
   loadGame();
   const filter = document.getElementById('taskStatusFilter').value;
   document.getElementById('binZone').hidden = filter !== 'completed';
+  document.getElementById('taskDrops').hidden = filter !== 'open';
+  paintDayStrip();
   try {
     const tasks = await fetchJson(
       `/api/tasks?status=${encodeURIComponent(filter)}`,
@@ -1719,6 +1731,7 @@ async function loadNotes(
   if (!LifeInboxPagination.beginListRequest(itemPagination)) {
     return false;
   }
+  loadBoard();
 
   const params = itemFilterParams();
   if (!append) {
@@ -2456,3 +2469,319 @@ window.addEventListener('popstate', () => {
   loadNotes();
   loadTasks();
 });
+
+
+// ---- Drop anywhere + sort board (by domain / by format) ----
+const FORMAT_ICONS = {
+  pdf: '📄', image: '🖼️', audio: '🎙️', link: '🔗', note: '📝',
+  spreadsheet: '📊', data: '🧩', textfile: '📃', other: '📦'
+};
+let sortOptions = {domains: [], formats: {}};
+let sortMode = 'domain';
+let sortFormatFilter = '';
+let sortItems = [];
+let boardLoading = false;
+
+async function loadSortOptions() {
+  try {
+    sortOptions = await fetchJson('/api/sorting/options', undefined, 'Unable to load sort options.');
+  } catch {
+    sortOptions = {domains: ['Unsorted'], formats: {}};
+  }
+}
+
+async function loadBoard() {
+  if (boardLoading) return;
+  boardLoading = true;
+  try {
+    if (!sortOptions.domains.length) await loadSortOptions();
+    sortItems = await fetchJson('/api/items?limit=500', undefined, 'Unable to load the board.');
+    renderBoard();
+  } catch {
+    document.getElementById('sortBoard').textContent = 'Could not load the board.';
+  } finally {
+    boardLoading = false;
+  }
+}
+
+function renderBoard() {
+  const board = document.getElementById('sortBoard');
+  const chips = document.getElementById('sortChips');
+  const formats = sortOptions.formats || {};
+  const present = new Set(sortItems.map(item => item.file_format));
+
+  chips.replaceChildren();
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.className = `chip${sortFormatFilter ? '' : ' chip-on'}`;
+  all.textContent = `All formats · ${sortItems.length}`;
+  all.addEventListener('click', () => { sortFormatFilter = ''; renderBoard(); });
+  chips.append(all);
+  for (const key of Object.keys(formats)) {
+    if (!present.has(key)) continue;
+    const count = sortItems.filter(item => item.file_format === key).length;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `chip${sortFormatFilter === key ? ' chip-on' : ''}`;
+    chip.textContent = `${FORMAT_ICONS[key] || ''} ${formats[key]} · ${count}`;
+    chip.addEventListener('click', () => { sortFormatFilter = sortFormatFilter === key ? '' : key; renderBoard(); });
+    chips.append(chip);
+  }
+
+  document.querySelectorAll('[data-sort-mode]').forEach(button => {
+    button.classList.toggle('chip-on', button.dataset.sortMode === sortMode);
+  });
+
+  const visible = sortItems.filter(item => !sortFormatFilter || item.file_format === sortFormatFilter);
+  const columns = sortMode === 'domain'
+    ? sortOptions.domains
+    : Object.keys(formats);
+  const keyOf = item => (sortMode === 'domain' ? item.domain : item.file_format);
+
+  board.replaceChildren();
+  if (!sortItems.length) {
+    board.innerHTML = '<p class="muted">Nothing to sort yet. Drop files, links or text anywhere on the page.</p>';
+    return;
+  }
+  for (const column of columns) {
+    const cards = visible.filter(item => keyOf(item) === column);
+    if (sortMode === 'format' && !cards.length) continue;
+    const col = document.createElement('section');
+    col.className = `board-col${column === 'Unsorted' ? ' board-col-unsorted' : ''}`;
+    col.dataset.column = column;
+    const heading = document.createElement('h3');
+    heading.textContent = `${sortMode === 'format' ? (FORMAT_ICONS[column] || '') + ' ' + (formats[column] || column) : column} · ${cards.length}`;
+    col.append(heading);
+    for (const item of cards) col.append(renderBoardCard(item));
+    if (!cards.length) {
+      const empty = document.createElement('p');
+      empty.className = 'board-empty';
+      empty.textContent = sortMode === 'domain' ? 'Drop an item here' : 'Empty';
+      col.append(empty);
+    }
+    if (sortMode === 'domain') {
+      col.addEventListener('dragover', event => {
+        if (!event.dataTransfer.types.includes('text/x-item-id')) return;
+        event.preventDefault();
+        col.classList.add('board-col-over');
+      });
+      col.addEventListener('dragleave', () => col.classList.remove('board-col-over'));
+      col.addEventListener('drop', event => {
+        col.classList.remove('board-col-over');
+        const id = Number(event.dataTransfer.getData('text/x-item-id'));
+        if (!id) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveItemToDomain(id, column);
+      });
+    }
+    board.append(col);
+  }
+}
+
+function renderBoardCard(item) {
+  const card = document.createElement('div');
+  card.className = 'board-card';
+  card.draggable = true;
+  card.dataset.itemId = String(item.id);
+  const title = item.title || item.original_filename || (item.raw_text || '').slice(0, 60) || `Item #${item.id}`;
+  const guess = item.domain_source === 'auto' && item.domain === 'Unsorted'
+    ? '<span class="pill">needs sorting</span>'
+    : item.domain_source === 'user' ? '<span class="pill">moved by you</span>' : '';
+  card.innerHTML = `<span class="board-ico">${FORMAT_ICONS[item.file_format] || '📦'}</span>`
+    + `<span class="board-title">${esc(title.length > 70 ? title.slice(0, 67) + '…' : title)}</span>`
+    + `<span class="board-sub">${esc(sortOptions.formats[item.file_format] || item.file_format)}${sortMode === 'format' ? ' · ' + esc(item.domain) : ''} ${guess}</span>`;
+  card.addEventListener('dragstart', event => {
+    event.dataTransfer.setData('text/x-item-id', String(item.id));
+    event.dataTransfer.effectAllowed = 'move';
+    card.classList.add('board-dragging');
+  });
+  card.addEventListener('dragend', () => card.classList.remove('board-dragging'));
+  return card;
+}
+
+async function moveItemToDomain(itemId, domain) {
+  const previous = sortItems.find(item => item.id === itemId);
+  try {
+    await fetchJson(
+      `/api/items/${itemId}/domain`,
+      {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({domain})
+      },
+      'Unable to move item.'
+    );
+    showToast(`Moved to ${domain}.`, previous ? {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        await fetchJson(`/api/items/${itemId}/domain`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({domain: previous.domain_source === 'user' ? previous.domain : null})
+        }, 'Unable to undo.');
+        await loadBoard();
+      }
+    } : {});
+    await loadBoard();
+  } catch {
+    setStatus('searchStatus', 'Could not move that item.', true);
+  }
+}
+
+function setSortMode(mode) {
+  sortMode = mode;
+  renderBoard();
+}
+
+// Drop anywhere: files, links and text, several at once.
+function setupDropAnywhere() {
+  const overlay = document.getElementById('dropOverlay');
+  let depth = 0;
+  const isExternal = event => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (types.includes('text/x-item-id') || types.includes('text/x-task-id')) return false;
+    return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain');
+  };
+  document.addEventListener('dragenter', event => {
+    if (!isExternal(event)) return;
+    depth += 1;
+    overlay.hidden = false;
+  });
+  document.addEventListener('dragover', event => {
+    if (isExternal(event)) event.preventDefault();
+  });
+  document.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) overlay.hidden = true;
+  });
+  document.addEventListener('drop', event => {
+    depth = 0;
+    overlay.hidden = true;
+    if (!isExternal(event)) return;
+    event.preventDefault();
+    handleDroppedData(event.dataTransfer);
+  });
+}
+
+async function handleDroppedData(dataTransfer) {
+  const jobs = [];
+  for (const file of Array.from(dataTransfer.files || [])) {
+    const kind = fileKind(file);
+    jobs.push(kind
+      ? {label: file.name, run: () => postCapture(kind, file)}
+      : {label: file.name, run: () => Promise.reject(new Error('unsupported'))});
+  }
+  if (!jobs.length) {
+    const uri = (dataTransfer.getData('text/uri-list') || '').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const plain = (dataTransfer.getData('text/plain') || '').trim();
+    for (const url of uri) jobs.push({label: url, run: () => postCapture('url', url)});
+    if (!uri.length && plain) {
+      jobs.push(looksLikeUrl(plain)
+        ? {label: plain, run: () => postCapture('url', plain)}
+        : {label: 'text', run: () => postCapture('note', plain)});
+    }
+  }
+  if (!jobs.length) return;
+
+  showToast(`Sorting ${jobs.length} dropped item${jobs.length === 1 ? '' : 's'}…`);
+  const saved = [];
+  const failed = [];
+  for (const job of jobs) {
+    try {
+      saved.push(await job.run());
+    } catch {
+      failed.push(job.label);
+    }
+  }
+  const summary = saved
+    .map(item => `${sortOptions.formats[item.file_format] || item.file_format} → ${item.domain}`)
+    .join(', ');
+  showToast(
+    `${saved.length ? `Saved ${saved.length}: ${summary}.` : ''}${failed.length ? ` Could not save: ${failed.join(', ')}.` : ''}`.trim()
+  );
+  await loadNotes();
+  await loadBoard();
+  updateNavCounts();
+}
+
+setupDropAnywhere();
+loadSortOptions();
+
+
+// ---- Drag a task onto a priority lane or a day ----
+function localIso(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function paintDayStrip() {
+  const strip = document.getElementById('dayStrip');
+  strip.replaceChildren();
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    const cell = document.createElement('div');
+    cell.className = 'day-cell';
+    cell.dataset.iso = localIso(date);
+    cell.innerHTML = `<small>${offset === 0 ? 'Today' : names[date.getDay()]}</small><strong>${date.getDate()}</strong>`;
+    strip.append(cell);
+  }
+}
+
+async function patchTask(taskId, body, message) {
+  try {
+    await fetchJson(
+      `/api/tasks/${taskId}`,
+      {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
+      'Unable to update task.'
+    );
+    showToast(message);
+    await loadTasks();
+    await loadAttention();
+    await loadCalendar();
+  } catch {
+    setStatus('taskStatus', 'Could not update that task.', true);
+  }
+}
+
+function setupTaskDrops() {
+  const wire = (zone, onDrop) => {
+    zone.addEventListener('dragover', event => {
+      if (!event.dataTransfer.types.includes('text/x-task-id')) return;
+      event.preventDefault();
+      zone.classList.add('drop-hot');
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drop-hot'));
+    zone.addEventListener('drop', event => {
+      zone.classList.remove('drop-hot');
+      const id = Number(event.dataTransfer.getData('text/x-task-id'));
+      if (!id) return;
+      event.preventDefault();
+      onDrop(id);
+    });
+  };
+  document.querySelectorAll('#priorityLanes .lane').forEach(lane => {
+    wire(lane, id => patchTask(id, {priority: lane.dataset.priority}, `Priority set to ${lane.dataset.priority}.`));
+  });
+  document.getElementById('dayStrip').addEventListener('dragover', event => {
+    if (event.dataTransfer.types.includes('text/x-task-id')) event.preventDefault();
+  });
+  document.getElementById('dayStrip').addEventListener('drop', event => {
+    const cell = event.target.closest('.day-cell');
+    const id = Number(event.dataTransfer.getData('text/x-task-id'));
+    if (!cell || !id) return;
+    event.preventDefault();
+    cell.classList.remove('drop-hot');
+    patchTask(id, {due_on: cell.dataset.iso}, `Deadline set for ${cell.dataset.iso}.`);
+  });
+  document.getElementById('dayStrip').addEventListener('dragover', event => {
+    const cell = event.target.closest('.day-cell');
+    document.querySelectorAll('.day-cell.drop-hot').forEach(c => c.classList.remove('drop-hot'));
+    if (cell) cell.classList.add('drop-hot');
+  });
+}
+setupTaskDrops();

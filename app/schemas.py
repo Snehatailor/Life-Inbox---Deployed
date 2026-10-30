@@ -66,9 +66,17 @@ class InboxItem(BaseModel):
     storage_path: Optional[str] = None
     extracted_text: Optional[str] = None
     ai_description: Optional[str] = None
+    file_format: str = "other"
+    domain: str = "Unsorted"
+    domain_confidence: str = "none"
+    domain_source: str = "auto"
     owner_user_id: Optional[int] = None
     created_at: str
     updated_at: Optional[str]
+
+
+class DomainUpdate(BaseModel):
+    domain: Optional[str] = Field(default=None, max_length=40)
 
 
 class UrlItemCreate(BaseModel):
@@ -207,6 +215,11 @@ class Task(BaseModel):
     source_item_ids: List[int]
     created_at: str
     updated_at: str
+
+
+class TaskPatch(BaseModel):
+    priority: Optional[Priority] = None
+    due_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
 class QuickTaskRequest(BaseModel):

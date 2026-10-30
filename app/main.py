@@ -92,7 +92,9 @@ from app.schemas import (
     Priority,
     SearchHit,
     Task,
+    DomainUpdate,
     QuickTaskRequest,
+    TaskPatch,
     TaskListStatus,
     TaskReminderRequest,
     TaskSnoozeRequest,
@@ -584,6 +586,56 @@ async def create_voice_item(file: UploadFile = File(...)):
     return _process_voice_item(item["id"])
 
 
+@app.patch("/api/items/{item_id}/domain", response_model=InboxItem)
+def patch_item_domain(item_id: int, payload: DomainUpdate):
+    from app.database import set_item_domain
+
+    try:
+        item = set_item_domain(item_id, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return item
+
+
+@app.get("/api/sorting/options")
+def sorting_options():
+    from app.sorting import DOMAINS, FORMAT_LABELS, UNSORTED
+
+    return {"domains": DOMAINS + [UNSORTED], "formats": FORMAT_LABELS}
+
+
+MAX_TEXT_FILE_BYTES = 1024 * 1024
+
+
+@app.post("/api/items/textfile", response_model=InboxItem)
+async def create_text_file_item(file: UploadFile = File(...)):
+    from pathlib import PurePosixPath
+
+    from app.database import add_text_file_item_to_db
+    from app.sorting import TEXT_FILE_EXT
+
+    name = PurePosixPath(file.filename or "file.txt").name or "file.txt"
+    if PurePosixPath(name.lower()).suffix not in TEXT_FILE_EXT:
+        raise HTTPException(
+            status_code=415,
+            detail="Supported text files: " + ", ".join(sorted(TEXT_FILE_EXT)),
+        )
+    data = await file.read(MAX_TEXT_FILE_BYTES + 1)
+    if len(data) > MAX_TEXT_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Text files must be under 1 MB.")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="That file is not UTF-8 text.") from exc
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="That file is empty.")
+    return add_text_file_item_to_db(
+        name, (file.content_type or "text/plain").split(";")[0], text
+    )
+
+
 @app.get("/api/items/{item_id}/file")
 def get_item_source_file(
     item_id: int,
@@ -859,6 +911,19 @@ async def create_voice_task(file: UploadFile = File(...)):
             detail="Transcription is not available. Type the task instead.",
         )
     return _quick_task_from_sentence(sentence)
+
+
+@app.patch("/api/tasks/{task_id}", response_model=Task)
+def patch_task(task_id: int, payload: TaskPatch):
+    from app.database import update_task_fields
+
+    try:
+        task = update_task_fields(task_id, payload.priority, payload.due_on)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
 
 
 @app.post("/api/tasks/{task_id}/bin", response_model=Task)
