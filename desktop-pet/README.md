@@ -20,7 +20,7 @@ npm start
 
 - A 🐾 menu-bar / tray icon lets you **show or hide** the pet, open Life Inbox, reload
   the pet, or quit.
-- Another address? `LIFE_INBOX_URL=http://127.0.0.1:9000 npm start`
+- Another address? macOS/Linux: `LIFE_INBOX_URL=http://127.0.0.1:9000 npm start`. Windows PowerShell: `$env:LIFE_INBOX_URL="http://127.0.0.1:9000"` on one line, then `npm start`.
 - If Life Inbox is not running yet, the app waits and retries every 5 seconds.
 
 ## What the pet does

@@ -4,6 +4,8 @@ Life Inbox is a small web app for capturing things you want to remember and orga
 
 This repository is a working starting point, not a finished product. Your team may change the product, the interface, or the structure when you have a reason.
 
+**Just want to run it?** See [`docs/RUNNING.md`](docs/RUNNING.md): short steps for Windows, macOS and Linux.
+
 **If you use Cursor or another coding agent, first tell it to read `AGENTS.md`.** The copy-paste prompts are in the next section. The run steps are immediately after that.
 
 You do not need to understand the entire codebase before your first change. Ask the coding agent to explain only the part involved in what you are trying to build.
