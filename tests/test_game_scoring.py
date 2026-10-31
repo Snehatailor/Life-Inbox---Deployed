@@ -107,3 +107,54 @@ def test_a_chosen_priority_or_a_closed_task_is_never_raised():
     assert effective_priority("Low", "user", "2026-10-30", TODAY) == "Low"
     assert effective_priority("Low", None, "2026-10-30", TODAY, status="completed") == "Low"
     assert effective_priority("Medium", None, "2026-10-30", TODAY, status="dismissed") == "Medium"
+
+
+def _at(text, tzname="UTC", now=None):
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.game.voice_task import parse_spoken_task
+
+    now = now or datetime(2026, 10, 31, 10, 54, tzinfo=timezone.utc)
+    tz = ZoneInfo(tzname)
+    return parse_spoken_task(text, now.astimezone(tz).date(), now, tz), tz
+
+
+def _local(result, tz):
+    return result["remind_at"].astimezone(tz).strftime("%H:%M") if result["remind_at"] else None
+
+
+def test_relative_reminders_become_a_time_and_leave_the_task_wording():
+    r, tz = _at("Order in 2 minutes")
+    assert (r["text"], _local(r, tz), r["due_on"]) == ("Order", "10:56", "2026-10-31")
+    r, tz = _at("Send report in an hour")
+    assert _local(r, tz) == "11:54"
+    r, tz = _at("Stretch in half an hour")
+    assert _local(r, tz) == "11:24"
+
+
+def test_remind_me_phrase_wins_over_other_times_in_the_sentence():
+    r, tz = _at("i need to send a meeting link in 20 minutes. remind me in 5 mins")
+    assert r["text"] == "Send a meeting link in 20 minutes"
+    assert _local(r, tz) == "10:59"
+
+
+def test_clock_times_use_the_persons_time_zone():
+    r, tz = _at("Call mom at 5pm", "Asia/Kolkata")  # it is 16:24 there
+    assert _local(r, tz) == "17:00" and r["text"] == "Call mom"
+    r, tz = _at("Pay the bill tomorrow at 9am, high priority", "Asia/Kolkata")
+    assert (_local(r, tz), r["due_on"], r["priority"]) == ("09:00", "2026-11-01", "High")
+
+
+def test_a_time_that_has_already_passed_today_is_not_scheduled():
+    r, _ = _at("meeting at 3:30 pm today", "Asia/Kolkata")  # 15:30 < 16:24 local
+    assert r["remind_at"] is None
+    r, tz = _at("Water the plants at 9am")  # 9am passed (10:54 UTC), no day named -> tomorrow
+    assert _local(r, tz) == "09:00" and r["due_on"] == "2026-11-01"
+
+
+def test_no_time_means_no_reminder_and_bad_clocks_are_ignored():
+    assert _at("remind me to order")[0]["remind_at"] is None
+    assert _at("buy milk")[0]["remind_at"] is None
+    r, _ = _at("Read at 25:00")
+    assert r["remind_at"] is None and r["text"] == "Read at 25:00"

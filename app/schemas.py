@@ -211,6 +211,7 @@ class Task(BaseModel):
     binned_at: Optional[str] = None
     slot_start: Optional[str] = None
     slot_end: Optional[str] = None
+    slot_set_at: Optional[str] = None
     timing_text: Optional[str]
     ai_timing_text: Optional[str] = None
     timing_confirmed: bool = False
@@ -265,6 +266,7 @@ class PetSettingsPatch(BaseModel):
 
 class QuickTaskRequest(BaseModel):
     sentence: str = Field(min_length=2, max_length=500)
+    tz: Optional[str] = Field(default=None, max_length=64)  # the person's IANA time zone
 
 
 class TaskTimingConfirm(BaseModel):

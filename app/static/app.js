@@ -992,7 +992,7 @@ async function addQuickTask(sentence) {
     {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({sentence})
+      body: JSON.stringify({sentence, tz: Intl.DateTimeFormat().resolvedOptions().timeZone})
     },
     'Unable to add task.'
   );
@@ -1000,6 +1000,11 @@ async function addQuickTask(sentence) {
 }
 
 function announceNewTask(task) {
+  if (task.slot_start) {
+    const at = new Date(task.slot_start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    showToast(`⏰ Reminder set for ${at}: “${task.text}”. Your pet will tell you.`);
+    return;
+  }
   const when = task.due_on ? ` · ${task.days_left_label}` : '';
   showToast(`Added “${task.text}” · ${task.priority} (+${task.points_value} coins)${when}`);
 }

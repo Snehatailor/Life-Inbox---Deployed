@@ -263,6 +263,7 @@ class TaskRecord(Base):
     priority_source = Column(Text, nullable=True)
     slot_start = Column(Text, nullable=True)
     slot_end = Column(Text, nullable=True)
+    slot_set_at = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
@@ -1211,6 +1212,7 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         "binned_at": task.binned_at,
         "slot_start": task.slot_start,
         "slot_end": task.slot_end,
+        "slot_set_at": task.slot_set_at,
         "timing_text": task.timing_text,
         "ai_timing_text": task.ai_timing_text,
         "timing_confirmed": bool(task.timing_confirmed),
@@ -1344,6 +1346,7 @@ def create_quick_task(
     due_on: Optional[str],
     due_confidence: Optional[str],
     priority_chosen: bool = False,
+    slot: Optional[tuple] = None,
 ) -> dict:
     """Create a task directly from a spoken or typed sentence (no source note)."""
     owner_id = require_owner_id()
@@ -1356,6 +1359,9 @@ def create_quick_task(
             text=text,
             priority=priority,
             priority_source="user" if priority_chosen else None,
+            slot_start=slot[0].astimezone(timezone.utc).isoformat() if slot else None,
+            slot_end=slot[1].astimezone(timezone.utc).isoformat() if slot else None,
+            slot_set_at=now if slot else None,
             timing_text=due_on,
             timing_confirmed=1 if due_on else 0,
             due_on=due_on,
@@ -1624,8 +1630,10 @@ def set_task_slot(task_id: int, start: Optional[str], end: Optional[str]) -> Opt
             return None
         if task.status != TASK_OPEN:
             raise ValueError("Only open tasks can be scheduled")
+        now_iso = datetime.now(timezone.utc).isoformat()
         task.slot_start, task.slot_end = start, end
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.slot_set_at = now_iso if start else None
+        task.updated_at = now_iso
         session.commit()
         return _task_to_dict(session, task)
 

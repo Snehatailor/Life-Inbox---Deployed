@@ -30,7 +30,17 @@
 
   // Reminders worth speaking up about that we have not already announced.
   function newAlerts(reminders, seen) {
-    return reminders.filter(r => r.phase !== 'later' && !seen[alertKey(r)]);
+    return reminders.filter(r => {
+      if (r.phase === 'later' || seen[alertKey(r)]) return false;
+      // "Remind me in 5 min" was just set: a heads-up now would only repeat it.
+      if (r.phase === 'soon' && r.lead_minutes !== null && r.lead_minutes !== undefined && r.lead_minutes <= 15) return false;
+      return true;
+    });
+  }
+
+  // True when the text names a time, so "Make task" would set a reminder.
+  function mentionsReminderTime(text) {
+    return /\b(?:in|after)\s+(?:\d+(?:\.\d+)?|an?|half\s+an?)\s*(?:minutes?|mins?|m|hours?|hrs?|h)\b|\b(?:at|@)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b|\bremind\b/i.test(text || '');
   }
 
   function pickQuip(state, hour, random) {
@@ -48,7 +58,7 @@
     return hour >= 23 || hour < 6;
   }
 
-  const api = {alertKey, alertText, newAlerts, pickQuip, isSleepyHour};
+  const api = {alertKey, alertText, newAlerts, pickQuip, isSleepyHour, mentionsReminderTime};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof window === 'undefined') return;
 
@@ -168,6 +178,11 @@
     panel.querySelector('.pp-save').addEventListener('click', () => saveText('note'));
     panel.querySelector('.pp-task').addEventListener('click', () => saveText('task'));
     panel.querySelector('.pp-open').addEventListener('click', openApp);
+    panel.querySelector('.pp-text').addEventListener('input', event => {
+      const reminder = mentionsReminderTime(event.target.value);
+      panel.querySelector('.pp-task').classList.toggle('secondary', !reminder);
+      status(reminder ? '⏰ That has a time. Press “Make task” and I will remind you.' : '');
+    });
     panel.querySelector('.pp-text').addEventListener('keydown', event => {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) saveText('note');
     });
@@ -210,9 +225,15 @@
         status('Saved to your inbox ✓');
         say(`${state ? state.pet.name : 'Pet'}: noted! 📝`, 4000);
       } else {
-        const task = await post('/api/tasks/quick', {sentence: value});
-        status(`Task added: “${task.text}” (${task.priority}, +${task.points_value} coins)`);
-        say('Task added! ✅', 4000);
+        const task = await post('/api/tasks/quick', {sentence: value, tz: Intl.DateTimeFormat().resolvedOptions().timeZone});
+        if (task.slot_start) {
+          const at = new Date(task.slot_start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+          status(`⏰ Reminder set for ${at}: “${task.text}”`);
+          say(`I'll remind you at ${at}! ⏰`, 5000);
+        } else {
+          status(`Task added: “${task.text}” (${task.priority}, +${task.points_value} coins)`);
+          say('Task added! ✅', 4000);
+        }
       }
       textarea.value = '';
       hop();

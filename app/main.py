@@ -877,26 +877,38 @@ def _transition_task(task_id: int, task_status: str):
     return task
 
 
-def _quick_task_from_sentence(sentence: str):
-    from app.attention.dates import today_in_configured_tz
-    from app.database import create_quick_task
-    from app.game.voice_task import parse_spoken_task
+def _quick_task_from_sentence(sentence: str, tz_name: Optional[str] = None):
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
 
-    parsed = parse_spoken_task(sentence, today_in_configured_tz())
+    from app.attention.dates import configured_timezone
+    from app.database import create_quick_task
+    from app.game.voice_task import REMINDER_MINUTES, parse_spoken_task
+
+    try:
+        tz = ZoneInfo(tz_name) if tz_name else configured_timezone()
+    except Exception:
+        tz = configured_timezone()
+    now = datetime.now(timezone.utc)
+    parsed = parse_spoken_task(sentence, now.astimezone(tz).date(), now, tz)
     if len(parsed["text"]) < 2:
         raise HTTPException(status_code=422, detail="I could not find a task in that.")
+    slot = None
+    if parsed["remind_at"] is not None:
+        slot = (parsed["remind_at"], parsed["remind_at"] + timedelta(minutes=REMINDER_MINUTES))
     return create_quick_task(
         parsed["text"],
         parsed["priority"],
         parsed["due_on"],
         parsed["due_confidence"],
         priority_chosen=parsed["priority_spoken"],
+        slot=slot,
     )
 
 
 @app.post("/api/tasks/quick", response_model=Task)
 def create_quick_task_endpoint(payload: QuickTaskRequest):
-    return _quick_task_from_sentence(payload.sentence)
+    return _quick_task_from_sentence(payload.sentence, payload.tz)
 
 
 @app.post("/api/tasks/voice", response_model=Task)

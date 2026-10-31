@@ -33,6 +33,7 @@ npm start
   high priority” works.
 - **Today tab:** tasks with a time slot and tasks due today. Tick ✓ to finish one; the
   pet cheers when your coins go up.
+- **Quick reminders:** in the Note tab, type a task with a time and press *Make task*: “send the meeting link in 20 min”, “call mom at 5pm”, “pay the bill tomorrow at 9am”, or “… remind me in 5 mins” (that last time wins over any other in the sentence). The pet tells you when the time arrives. Times use your own time zone. *Save note* only saves text; it never sets a reminder.
 - **Reminders:** schedule a slot (Life Inbox → a High task → ⋯ → *Find a time* → click a
   time). The pet speaks up 10 minutes before, when the slot starts, and if you missed it,
   with a native notification and a chime. Each reminder is announced once.

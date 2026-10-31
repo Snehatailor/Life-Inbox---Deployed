@@ -265,3 +265,21 @@ def test_a_priority_you_chose_is_never_raised(client):
     assert (pinned["priority"], pinned["priority_raised"], pinned["priority_source"]) == ("Medium", False, "user")
     levels = {t["id"]: t["priority"] for t in client.get("/api/tasks?status=open").json()}
     assert levels == {spoken["id"]: "Low", auto["id"]: "Medium"}  # both stay where the person put them
+
+
+def test_quick_add_with_a_time_creates_a_slot_the_pet_will_remind_about(client):
+    from datetime import datetime, timezone
+
+    task = client.post("/api/tasks/quick", json={"sentence": "Order lunch in 20 minutes", "tz": "Asia/Kolkata"}).json()
+    assert task["text"] == "Order lunch" and task["slot_start"] and task["slot_set_at"]
+    start = datetime.fromisoformat(task["slot_start"])
+    assert 18 <= (start - datetime.now(timezone.utc)).total_seconds() / 60 <= 21
+
+    reminders = client.get("/api/pet/state").json()["reminders"]
+    assert [(r["task_id"], r["phase"], r["lead_minutes"]) for r in reminders] == [(task["id"], "later", 20)]
+    assert task["due_on"] == datetime.now(timezone.utc).astimezone(__import__("zoneinfo").ZoneInfo("Asia/Kolkata")).date().isoformat()
+
+
+def test_a_bad_time_zone_falls_back_instead_of_failing(client):
+    task = client.post("/api/tasks/quick", json={"sentence": "Ping the team in 30 minutes", "tz": "Not/AZone"})
+    assert task.status_code == 200 and task.json()["slot_start"]

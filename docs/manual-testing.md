@@ -185,3 +185,11 @@ Rule: an open task with a deadline is raised to High within 2 days (or when over
 - [ ] Complete the task: the reminders stop and the pet cheers
 - [ ] Desktop companion (`desktop-pet/`): `npm install && npm start` shows the pet over other apps; clicks pass through everywhere except the pet and its panel; the tray icon shows/hides or quits it
 - [ ] With Life Inbox stopped, the companion waits and recovers when it starts
+
+## Quick reminders ("in 20 min", "at 5pm")
+
+- [ ] Task box or pet panel → "Check the oven in 2 minutes" → Make task: the task is "Check the oven", with a 🕘 slot 2 minutes ahead and a toast "Reminder set for …"
+- [ ] The pet says "time for Check the oven — now!" within about 20 seconds of that time, once, and does not announce it when you create it
+- [ ] "i need to send a link in 20 minutes. remind me in 5 mins" reminds at 5 minutes (the "remind me" time wins)
+- [ ] "call mom at 5pm" and "pay the bill tomorrow at 9am" use your own time zone; a time already past today with "today" in the sentence makes no reminder
+- [ ] Typing a time in the pet's note box shows "That has a time. Press Make task…"; "Save note" never creates a reminder

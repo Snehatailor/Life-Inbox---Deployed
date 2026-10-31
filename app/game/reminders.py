@@ -57,9 +57,12 @@ def build_reminders(tasks: list[dict], now: datetime) -> list[dict]:
         if phase is None:
             continue
         minutes = int((start - now).total_seconds() // 60) if phase != "missed" else int((end - now).total_seconds() // 60)
+        set_at = parse_utc(task.get("slot_set_at"))
+        lead = round((start - set_at).total_seconds() / 60) if set_at else None
         reminders.append(
             {
                 "task_id": task["id"],
+                "lead_minutes": lead,
                 "text": task["text"],
                 "priority": task["priority"],
                 "domain": task.get("domain"),

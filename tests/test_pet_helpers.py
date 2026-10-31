@@ -59,6 +59,29 @@ def test_each_phase_is_announced_once_and_later_is_silent():
     assert out == {"first": [7], "second": [], "third": ["now"]}
 
 
+def test_a_reminder_set_minutes_ahead_skips_the_pointless_heads_up_but_still_fires_at_the_time():
+    out = run_node(f"""
+      const base = {json.dumps(REMINDER)};
+      const justSet = {{...base, lead_minutes: 5}};
+      const planned = {{...base, lead_minutes: 120}};
+      const unknown = {{...base, lead_minutes: null}};
+      console.log(JSON.stringify({{
+        justSet: h.newAlerts([justSet], {{}}).length,
+        justSetNow: h.newAlerts([{{...justSet, phase: 'now'}}], {{}}).length,
+        planned: h.newAlerts([planned], {{}}).length,
+        unknown: h.newAlerts([unknown], {{}}).length,
+      }}));""")
+    assert out == {"justSet": 0, "justSetNow": 1, "planned": 1, "unknown": 1}
+
+
+def test_the_panel_notices_when_text_names_a_time():
+    out = run_node("""
+      const yes = ['send the link in 20 min', 'call at 5pm', 'Remind me later', 'in an hour', 'at 17:30'];
+      const no = ['buy milk', 'a note about nothing', 'in the park', 'at home'];
+      console.log(JSON.stringify({yes: yes.map(h.mentionsReminderTime), no: no.map(h.mentionsReminderTime)}));""")
+    assert all(out["yes"]) and not any(out["no"])
+
+
 def test_quips_reflect_the_situation_and_sleepy_hours():
     out = run_node("""
       const base = {overdue_count: 0, due_today: [], goal_met: false, goal: 100, points_today: 70, streak: 0};
