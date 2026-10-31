@@ -32,6 +32,8 @@ from app.attention.dates import today_in_configured_tz
 from app.game.gcal import google_event_url
 from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
+from app.game.reminders import build_reminders, parse_utc, validate_slot
+from app.game.shop import PETS, STARTER_PET, pet_by_id, spendable_balance
 from app.game.teams import (
     build_leaderboard,
     new_invite_code,
@@ -259,8 +261,33 @@ class TaskRecord(Base):
     domain = Column(Text, nullable=True)
     domain_source = Column(Text, nullable=True)
     priority_source = Column(Text, nullable=True)
+    slot_start = Column(Text, nullable=True)
+    slot_end = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
+
+
+class ShopPurchaseRecord(Base):
+    __tablename__ = "shop_purchases"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "item_id", name="uq_shop_owner_item"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    item_id = Column(Text, nullable=False)
+    price = Column(Integer, nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class PetSettingsRecord(Base):
+    __tablename__ = "pet_settings"
+
+    owner_user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    active_pet = Column(Text, nullable=False, default="cat")
+    pet_name = Column(Text, nullable=True)
+    in_page = Column(Integer, nullable=False, default=0)
 
 
 class PointEventRecord(Base):
@@ -1182,6 +1209,8 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
         "completed_at": task.completed_at,
         "points_awarded": task.points_awarded,
         "binned_at": task.binned_at,
+        "slot_start": task.slot_start,
+        "slot_end": task.slot_end,
         "timing_text": task.timing_text,
         "ai_timing_text": task.ai_timing_text,
         "timing_confirmed": bool(task.timing_confirmed),
@@ -1577,6 +1606,173 @@ def team_summary_from_db() -> dict:
                 "private_count": board["private_count"],
             }
         }
+
+
+def set_task_slot(task_id: int, start: Optional[str], end: Optional[str]) -> Optional[dict]:
+    """Save (or clear, with None) the time slot a person scheduled for a task."""
+    if start is not None:
+        start_dt, end_dt = parse_utc(start), parse_utc(end)
+        if start_dt is None or end_dt is None:
+            raise ValueError("Slot times must be ISO date-times with a time zone")
+        validate_slot(start_dt, end_dt)
+        start = start_dt.astimezone(timezone.utc).isoformat()
+        end = end_dt.astimezone(timezone.utc).isoformat()
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be scheduled")
+        task.slot_start, task.slot_end = start, end
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def _pet_settings(session, owner_id: int) -> "PetSettingsRecord":
+    settings = session.get(PetSettingsRecord, owner_id)
+    if settings is None:
+        settings = PetSettingsRecord(
+            owner_user_id=owner_id, active_pet=STARTER_PET, in_page=0
+        )
+        session.add(settings)
+        session.flush()
+    return settings
+
+
+def _wallet(session, owner_id: int) -> tuple[int, int, set]:
+    earned = int(
+        session.scalar(
+            select(func.coalesce(func.sum(PointEventRecord.points), 0)).where(
+                PointEventRecord.owner_user_id == owner_id
+            )
+        )
+        or 0
+    )
+    rows = session.execute(
+        select(ShopPurchaseRecord.item_id, ShopPurchaseRecord.price).where(
+            ShopPurchaseRecord.owner_user_id == owner_id
+        )
+    ).all()
+    owned = {item_id for item_id, _ in rows} | {STARTER_PET}
+    return earned, sum(price for _, price in rows), owned
+
+
+def shop_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        earned, spent, owned = _wallet(session, owner_id)
+        session.commit()
+        balance = spendable_balance(earned, spent)
+        items = [
+            {
+                **pet,
+                "owned": pet["id"] in owned,
+                "active": pet["id"] == settings.active_pet,
+                "affordable": pet["id"] in owned or pet["price"] <= balance,
+            }
+            for pet in PETS
+        ]
+        return {
+            "balance": balance,
+            "earned": earned,
+            "spent": spent,
+            "active_pet": settings.active_pet,
+            "items": items,
+        }
+
+
+def buy_pet(pet_id: str) -> dict:
+    pet = pet_by_id(pet_id)
+    if pet is None:
+        raise LookupError("No such pet")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        earned, spent, owned = _wallet(session, owner_id)
+        if pet_id in owned:
+            raise ValueError("You already have this pet")
+        if spendable_balance(earned, spent) < pet["price"]:
+            raise PermissionError("Not enough coins yet")
+        session.add(
+            ShopPurchaseRecord(
+                owner_user_id=owner_id,
+                item_id=pet_id,
+                price=pet["price"],
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+        session.commit()
+    return shop_summary_from_db()
+
+
+def select_pet(pet_id: str) -> dict:
+    if pet_by_id(pet_id) is None:
+        raise LookupError("No such pet")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        _, _, owned = _wallet(session, owner_id)
+        if pet_id not in owned:
+            raise ValueError("Buy this pet in the shop first")
+        settings = _pet_settings(session, owner_id)
+        if settings.active_pet != pet_id:
+            settings.pet_name = None  # a new pet starts with its own name
+        settings.active_pet = pet_id
+        session.commit()
+    return shop_summary_from_db()
+
+
+def update_pet_settings(name: Optional[str], in_page: Optional[bool]) -> dict:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        if name is not None:
+            settings.pet_name = " ".join(name.split())[:24] or None
+        if in_page is not None:
+            settings.in_page = 1 if in_page else 0
+        session.commit()
+    return pet_state_from_db()
+
+
+def pet_state_from_db() -> dict:
+    """Everything the roaming pet needs in one call."""
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc)
+    game = game_summary_from_db()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        earned, spent, _ = _wallet(session, owner_id)
+        session.commit()
+        pet = pet_by_id(settings.active_pet) or pet_by_id(STARTER_PET)
+        state_pet = {
+            "id": pet["id"],
+            "emoji": pet["emoji"],
+            "species": pet["species"],
+            "name": settings.pet_name or pet["name"],
+        }
+        in_page = bool(settings.in_page)
+    tasks = list_tasks_from_db(TASK_OPEN)
+    today = today_in_configured_tz().isoformat()
+    return {
+        "pet": state_pet,
+        "in_page": in_page,
+        "balance": spendable_balance(earned, spent),
+        "points_today": game["points_today"],
+        "goal": game["goal"],
+        "goal_met": game["goal_met"],
+        "streak": game["streak"],
+        "reminders": build_reminders(tasks, now),
+        "due_today": [
+            {"task_id": t["id"], "text": t["text"], "priority": t["priority"]}
+            for t in tasks
+            if t.get("due_on") == today and not t.get("slot_start")
+        ][:8],
+        "overdue_count": sum(
+            1 for t in tasks if t.get("days_left") is not None and t["days_left"] < 0
+        ),
+        "now": now.isoformat(),
+    }
 
 
 def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:

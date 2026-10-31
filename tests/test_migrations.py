@@ -122,6 +122,8 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
             "domain",
             "domain_source",
             "priority_source",
+            "slot_start",
+            "slot_end",
             "created_at",
             "updated_at",
         }

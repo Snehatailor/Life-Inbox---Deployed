@@ -16,6 +16,7 @@ Branch: `game/task-quest` (from `main` @ 6b3681d)
 | 7 Drag and drop | Done: drop anywhere, domain/format board, task lanes and day strip |
 | 8 Time slots | Done: "Find time" on High tasks, using busy times from an imported .ics (no Google sign-in needed); events open in Google Calendar to confirm |
 | 9 Team leaderboard | Done: invite-code teams, opt-in weekly board, points/streak only |
+| 11 Coin shop, pets, desktop companion | Done: 9 pets, wallet, saved time slots with reminders, tap-for-notes, Electron companion (`desktop-pet/`) |
 | 10 Spoken briefing | Done: button, `B` shortcut and "what's due today?" typed or spoken |
 
 ## What already exists (we build on it)

@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/pet.css" />
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -163,6 +164,7 @@
             <small id="levelNext" class="muted"></small>
             <div id="questWeek" class="quest-week" aria-label="Last 7 days"></div>
             <div class="quest-tools">
+              <button type="button" id="shopButton" class="secondary" title="Spend coins on pets">🛍️ Pet shop · <span id="shopBalance"></span></button>
               <button type="button" id="briefingButton" class="secondary" title="Read today's tasks aloud (B)">🗣️ What's due today?</button>
               <button type="button" id="soundToggle" class="ghost" aria-pressed="true">🔊 Sound on</button>
               <details class="quest-help">
@@ -360,6 +362,23 @@
     </div>
   </div>
 
+  <dialog id="shopDialog" class="shop-dialog" aria-labelledby="shopHeading">
+    <header class="shop-header">
+      <div>
+        <h2 id="shopHeading">Pet shop</h2>
+        <p class="sub">Spend the coins you earn on a companion. Spending never lowers your daily progress, streak or level.</p>
+      </div>
+      <button type="button" id="shopClose" class="ghost" aria-label="Close shop">×</button>
+    </header>
+    <p id="shopDialogBalance" class="shop-balance"></p>
+    <div id="petGrid" class="pet-grid"></div>
+    <div class="pet-settings">
+      <label>Pet name <input id="petName" maxlength="24" placeholder="Name your pet"></label>
+      <label class="check"><input type="checkbox" id="petInPage"> Show my pet roaming on this page</label>
+      <p class="muted">For a pet that walks across your whole screen, run the <a href="/pet" target="_blank" rel="noopener">desktop companion</a> (see <code>desktop-pet/README.md</code>).</p>
+    </div>
+  </dialog>
+
   <dialog id="shortcutsDialog" class="shortcuts-dialog" aria-labelledby="shortcutsHeading">
     <div class="shortcuts-header">
       <h2 id="shortcutsHeading">Keyboard shortcuts</h2>
@@ -384,6 +403,8 @@
   <!-- Short confirmations ("Task completed · Undo") appear here. -->
   <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
 
+  <div id="petLayer" class="pet-layer" aria-live="polite"></div>
+  <script src="/static/pet.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -979,6 +979,7 @@ async function loadGame() {
       }
     }
     lastQuestPoints = game.points_today;
+    loadShopBalance();
   } catch {
     /* progress is decorative; ignore failures */
   }
@@ -1961,6 +1962,7 @@ function rowBadges(task) {
     wrap.append(badge);
   }
   if (isSnoozed(task)) wrap.append(h('span', 'pill snoozed-pill', `Snoozed until ${task.snoozed_until}`));
+  if (task.slot_start) wrap.append(h('span', 'pill slot-pill', `🕘 ${formatSlot(task.slot_start, task.slot_end)}`));
   return wrap;
 }
 
@@ -2007,6 +2009,13 @@ function renderTaskRow(task, {showSection = true} = {}) {
   }
   if (task.priority === 'High' && task.due_on) {
     more.pop.append(menuItem('Find a time', () => toggleSlots(task, row)));
+  }
+  if (task.slot_start) {
+    more.pop.append(menuItem('Clear time slot', async () => {
+      await fetchJson(`/api/tasks/${task.id}/slot`, {method: 'DELETE'}, 'Unable to clear the slot.');
+      showToast('Time slot cleared.');
+      await refreshAll();
+    }));
   }
   if (task.google_event_url) {
     more.pop.append(menuItem('Add to Google Calendar', () => window.open(task.google_event_url, '_blank', 'noopener')));
@@ -2766,15 +2775,29 @@ async function toggleSlots(task, card, minutes = 45) {
       panel.append(none);
     }
     for (const slot of result.slots) {
-      const button = actionButton(slot.label, 'secondary slot-btn', () => {
-        window.open(slot.google_url, '_blank', 'noopener');
+      const choice = h('div', 'slot-choice');
+      const schedule = actionButton(slot.label, 'secondary slot-btn', async () => {
+        try {
+          await taskAction(`/api/tasks/${task.id}/slot`, {start: slot.start, end: slot.end}, 'Unable to save the slot.');
+          showToast(`Scheduled ${slot.label}. Your pet will remind you.`);
+          await refreshAll();
+        } catch {
+          showToast('Could not save that slot.');
+        }
       });
-      panel.append(button);
+      schedule.title = 'Save this time on the task. Your pet reminds you before it starts.';
+      const google = h('a', 'slot-google', 'Google');
+      google.href = slot.google_url;
+      google.target = '_blank';
+      google.rel = 'noopener';
+      google.title = 'Also add it to Google Calendar';
+      choice.append(schedule, google);
+      panel.append(choice);
     }
     const note = document.createElement('p');
     note.className = 'muted slots-note';
     note.textContent = result.calendar_loaded
-      ? 'Avoids the meetings in your imported calendar. Opens Google Calendar for you to confirm.'
+      ? 'Avoids the meetings in your imported calendar. Click a time to schedule it; “Google” also opens Google Calendar to confirm.'
       : 'No calendar imported, so these only respect 9–18 weekdays. Import your calendar on the Google Calendar screen.';
     panel.append(note);
   } catch {
@@ -3008,3 +3031,144 @@ function applyNavWidth(width, {save = true} = {}) {
   slider.addEventListener('input', () => applyNavWidth(Number(slider.value)));
   slider.addEventListener('dblclick', () => applyNavWidth(NAV_DEFAULT));
 })();
+
+
+// ---- Coin shop and pets ----
+function formatSlot(startIso, endIso) {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const day = start.toLocaleDateString(undefined, {weekday: 'short', day: 'numeric', month: 'short'});
+  const time = date => date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  return `${day} ${time(start)}–${time(end)}`;
+}
+
+let shopData = null;
+
+async function loadShopBalance() {
+  try {
+    shopData = await fetchJson('/api/shop', undefined, 'Unable to load the shop.');
+    document.getElementById('shopBalance').innerHTML = coinHtml(shopData.balance);
+    if (document.getElementById('shopDialog').open) renderShop();
+  } catch { /* the shop is optional */ }
+}
+
+async function openShop() {
+  const dialog = document.getElementById('shopDialog');
+  await loadShopBalance();
+  renderShop();
+  if (!dialog.open) dialog.showModal();
+}
+
+async function shopAction(url, body, failure) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let detail = failure;
+    try { detail = (await response.json()).detail || failure; } catch { /* keep default */ }
+    throw new Error(typeof detail === 'string' ? detail : failure);
+  }
+  return response.json();
+}
+
+function renderShop() {
+  if (!shopData) return;
+  document.getElementById('shopDialogBalance').innerHTML = `${coinHtml(shopData.balance)} to spend`;
+  const grid = document.getElementById('petGrid');
+  grid.replaceChildren();
+  for (const pet of shopData.items) {
+    const card = h('div', `pet-card${pet.active ? ' pet-active' : ''}${pet.owned ? '' : ' pet-locked'}`);
+    card.append(h('div', 'pet-emoji', pet.emoji));
+    card.append(h('strong', '', pet.name), h('div', 'muted pet-species', pet.species), h('p', 'pet-blurb', pet.blurb));
+    const action = h('div', 'pet-action');
+    if (pet.active) {
+      action.append(h('span', 'pill', 'Your pet'));
+    } else if (pet.owned) {
+      const select = h('button', '', 'Choose');
+      select.type = 'button';
+      select.addEventListener('click', async () => {
+        try {
+          shopData = await shopAction('/api/pet/select', {pet_id: pet.id}, 'Could not choose that pet.');
+          showToast(`${pet.name} is your pet now.`);
+          renderShop();
+          loadPetSettings();
+          if (window.LifeInboxPet.isMounted()) window.LifeInboxPet.refresh();
+        } catch (error) { showToast(error.message); }
+      });
+      action.append(select);
+    } else {
+      const buy = h('button', pet.affordable ? '' : 'secondary');
+      buy.type = 'button';
+      buy.innerHTML = `Buy · ${coinHtml(pet.price)}`;
+      buy.disabled = !pet.affordable;
+      buy.title = pet.affordable ? `Buy ${pet.name}` : `You need ${pet.price - shopData.balance} more coins`;
+      buy.addEventListener('click', async () => {
+        try {
+          shopData = await shopAction('/api/shop/buy', {item_id: pet.id}, 'Could not buy that pet.');
+          showToast(`🎉 ${pet.name} the ${pet.species} joined you!`);
+          document.getElementById('shopBalance').innerHTML = coinHtml(shopData.balance);
+          renderShop();
+          if (window.LifeInboxPet.isMounted()) window.LifeInboxPet.refresh();
+        } catch (error) { showToast(error.message); }
+      });
+      action.append(buy);
+    }
+    card.append(action);
+    grid.append(card);
+  }
+}
+
+document.getElementById('shopButton').addEventListener('click', openShop);
+document.getElementById('shopClose').addEventListener('click', () => document.getElementById('shopDialog').close());
+
+
+async function loadPetSettings() {
+  try {
+    const state = await fetchJson('/api/pet/state', undefined, 'Unable to load your pet.');
+    document.getElementById('petName').value = state.pet.name;
+    document.getElementById('petInPage').checked = state.in_page;
+    return state;
+  } catch { return null; }
+}
+
+async function savePetSettings(body) {
+  const response = await fetch('/api/pet/settings', {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error('Could not save pet settings.');
+  const state = await response.json();
+  syncInPagePet(state);
+  return state;
+}
+
+document.getElementById('shopButton').addEventListener('click', loadPetSettings);
+document.getElementById('petName').addEventListener('change', async event => {
+  try {
+    const state = await savePetSettings({name: event.target.value});
+    event.target.value = state.pet.name;
+    showToast(`Your pet is called ${state.pet.name}.`);
+  } catch (error) { showToast(error.message); }
+});
+document.getElementById('petInPage').addEventListener('change', async event => {
+  try {
+    await savePetSettings({in_page: event.target.checked});
+    showToast(event.target.checked ? 'Your pet is roaming this page.' : 'Your pet left this page.');
+  } catch (error) { showToast(error.message); }
+});
+
+
+// The optional in-page pet (the desktop companion shows the same pet on screen).
+async function syncInPagePet(known) {
+  try {
+    const state = known || await fetchJson('/api/pet/state', undefined, 'Unable to load your pet.');
+    const pet = window.LifeInboxPet;
+    if (state.in_page && !pet.isMounted()) pet.mount(document.getElementById('petLayer'), {greet: false});
+    else if (!state.in_page && pet.isMounted()) pet.unmount();
+    else if (pet.isMounted()) pet.refresh();
+  } catch { /* the pet is optional */ }
+}
+syncInPagePet();

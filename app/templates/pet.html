@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Life Inbox Pet</title>
+  <link rel="stylesheet" href="/static/pet.css">
+  <style>html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }</style>
+</head>
+<body>
+  <p class="pet-hint" id="petHint" hidden>Desktop companion preview. In the companion app this page is transparent and the pet walks across your screen.</p>
+  <div id="petRoot" class="pet-root"></div>
+  <script src="/static/pet.js"></script>
+  <script>
+    if (!window.petBridge) {
+      document.body.classList.add('pet-standalone');
+      document.getElementById('petHint').hidden = false;
+    }
+    window.LifeInboxPet.mount(document.getElementById('petRoot'));
+  </script>
+</body>
+</html>

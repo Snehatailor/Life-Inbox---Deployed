@@ -93,7 +93,11 @@ from app.schemas import (
     SearchHit,
     Task,
     DomainUpdate,
+    PetSelect,
+    PetSettingsPatch,
     QuickTaskRequest,
+    ShopBuy,
+    SlotRequest,
     TaskPatch,
     TeamCreate,
     TeamJoin,
@@ -1051,6 +1055,84 @@ def game_briefing():
         today_in_configured_tz(),
         _dt.now(configured_timezone()).hour,
     )
+
+
+@app.get("/api/shop")
+def get_shop():
+    from app.database import shop_summary_from_db
+
+    return shop_summary_from_db()
+
+
+@app.post("/api/shop/buy")
+def shop_buy(payload: ShopBuy):
+    from app.database import buy_pet
+
+    try:
+        return buy_pet(payload.item_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/pet/select")
+def pet_select(payload: PetSelect):
+    from app.database import select_pet
+
+    try:
+        return select_pet(payload.pet_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/pet/state")
+def pet_state():
+    from app.database import pet_state_from_db
+
+    return pet_state_from_db()
+
+
+@app.patch("/api/pet/settings")
+def pet_settings(payload: PetSettingsPatch):
+    from app.database import update_pet_settings
+
+    return update_pet_settings(payload.name, payload.in_page)
+
+
+@app.post("/api/tasks/{task_id}/slot", response_model=Task)
+def save_task_slot(task_id: int, payload: SlotRequest):
+    from app.database import set_task_slot
+
+    try:
+        task = set_task_slot(task_id, payload.start, payload.end)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.delete("/api/tasks/{task_id}/slot", response_model=Task)
+def clear_task_slot(task_id: int):
+    from app.database import set_task_slot
+
+    try:
+        task = set_task_slot(task_id, None, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/pet", response_class=HTMLResponse)
+def pet_page():
+    return (APP_DIR / "templates" / "pet.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/game/today")

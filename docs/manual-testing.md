@@ -172,3 +172,16 @@ Rule: an open task with a deadline is raised to High within 2 days (or when over
 - [ ] Leave the page open across midnight (or change the date): lists reload and tasks move up without a manual refresh
 
 - [ ] Everywhere the app showed "pts" or "points" it now shows a gold coin image or the word "coins" (task rows, priority lanes, daily ring, level line, leaderboard, toasts, spoken briefing)
+
+## Coin shop, pets and the desktop companion
+
+- [ ] Today → Daily quest → **Pet shop** shows your coin balance and 9 pets; pets you cannot afford are disabled and say how many coins are missing
+- [ ] Buy a pet: the balance drops, the daily ring / streak / level do not; buying it again is refused; **Choose** switches the active pet
+- [ ] Rename the pet; choosing a different pet gives it its own default name
+- [ ] Tick “Show my pet roaming on this page”: the pet walks along the bottom of the app; tick it off and it leaves
+- [ ] Tap the pet: the panel opens with Note and Today tabs; *Save note* puts a note in the Inbox; *Make task* creates a task
+- [ ] On a High task: ⋯ → Find a time → click a time: the task shows a 🕘 slot; ⋯ → Clear time slot removes it
+- [ ] With a slot 5 minutes away, the pet says it starts in 5 min (once); at the start it says “now”; after the slot ends with the task still open it says you missed it
+- [ ] Complete the task: the reminders stop and the pet cheers
+- [ ] Desktop companion (`desktop-pet/`): `npm install && npm start` shows the pet over other apps; clicks pass through everywhere except the pet and its panel; the tray icon shows/hides or quits it
+- [ ] With Life Inbox stopped, the companion waits and recovers when it starts

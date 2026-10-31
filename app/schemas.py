@@ -209,6 +209,8 @@ class Task(BaseModel):
     completed_at: Optional[str] = None
     points_awarded: Optional[int] = None
     binned_at: Optional[str] = None
+    slot_start: Optional[str] = None
+    slot_end: Optional[str] = None
     timing_text: Optional[str]
     ai_timing_text: Optional[str] = None
     timing_confirmed: bool = False
@@ -241,6 +243,24 @@ class TeamJoin(BaseModel):
 
 class TeamSharing(BaseModel):
     share: bool
+
+
+class SlotRequest(BaseModel):
+    start: str = Field(min_length=10, max_length=40)
+    end: str = Field(min_length=10, max_length=40)
+
+
+class ShopBuy(BaseModel):
+    item_id: str = Field(min_length=1, max_length=40)
+
+
+class PetSelect(BaseModel):
+    pet_id: str = Field(min_length=1, max_length=40)
+
+
+class PetSettingsPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=24)
+    in_page: Optional[bool] = None
 
 
 class QuickTaskRequest(BaseModel):
