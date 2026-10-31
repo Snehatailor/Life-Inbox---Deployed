@@ -692,3 +692,11 @@ a[data-view-link="calendar"] { position: relative; }
 .pet-action button { width: 100%; }
 .pet-settings { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .pet-settings label:not(.check) { display: flex; flex-direction: column; gap: 4px; max-width: 280px; }
+
+/* Procrastination Radar */
+button.radar-pill { margin: 0 0 0 6px; min-height: 0; padding: 2px 9px; border: 0; border-radius: 999px; cursor: help; font-size: 12px; line-height: 1.6; }
+button.radar-pill:active { transform: none; }
+button.radar-on_track, button.radar-on_track:hover { background: transparent; padding: 2px 4px; }
+button.radar-watch, button.radar-watch:hover { background: var(--warn-soft); color: var(--warn-text); }
+button.radar-at_risk, button.radar-at_risk:hover { background: var(--danger-soft); color: var(--danger-text); }
+.start-ten-btn { margin-top: 0; white-space: nowrap; }

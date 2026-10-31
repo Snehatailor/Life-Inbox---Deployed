@@ -1816,9 +1816,10 @@ async function taskAction(path, body, failure) {
 async function completeTask(task, row) {
   row.classList.add('task-completing');
   try {
-    await taskAction(`/api/tasks/${task.id}/complete`, undefined, 'Unable to complete task.');
+    const done = await taskAction(`/api/tasks/${task.id}/complete`, undefined, 'Unable to complete task.');
     await new Promise(resolve => setTimeout(resolve, 300));
-    showToast(`Done: ${task.text}`, {
+    const rescued = done && done.rescue_bonus ? ` · +${done.rescue_bonus} rescue bonus! You beat the procrastination on this one.` : '';
+    showToast(`Done: ${task.text}${rescued}`, {
       actionLabel: 'Undo',
       onAction: async () => {
         await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to undo.');
@@ -1966,9 +1967,42 @@ function rowBadges(task) {
     paintDaysBadge(badge);
     wrap.append(badge);
   }
+  if (task.radar) wrap.append(radarBadge(task.radar));
   if (isSnoozed(task)) wrap.append(h('span', 'pill snoozed-pill', `Snoozed until ${task.snoozed_until}`));
   if (task.slot_start) wrap.append(h('span', 'pill slot-pill', `🕘 ${formatSlot(task.slot_start, task.slot_end)}`));
   return wrap;
+}
+
+const RADAR_LABELS = {on_track: '🟢', watch: '🟡 Watch', at_risk: '🔴 At risk'};
+const RADAR_TITLES = {on_track: 'On track', watch: 'Watch', at_risk: 'At risk'};
+
+// Procrastination Radar badge. Hover (or tap) shows every reason behind the score.
+function radarBadge(radar) {
+  const badge = h('button', `pill radar-pill radar-${radar.level}`, RADAR_LABELS[radar.level]);
+  badge.type = 'button';
+  const lines = radar.reasons.map(r => `• ${r.text} (${r.points > 0 ? '+' : ''}${r.points})`);
+  const summary = `${RADAR_TITLES[radar.level]}: ${radar.score}/100`;
+  badge.title = lines.length ? `${summary}\n${lines.join('\n')}` : `${summary}\nNothing is pushing this task yet.`;
+  badge.setAttribute('aria-label', `Radar ${summary}`);
+  badge.addEventListener('click', event => {
+    event.stopPropagation();
+    showToast(lines.length ? `${summary} · ${radar.reasons.map(r => r.text).join(' · ')}` : `${summary}. Nothing is pushing this task yet.`);
+  });
+  return badge;
+}
+
+// "Start 10 min": book a 10-minute slot from now, so the usual slot reminder asks "done?" after.
+async function startTenMinutes(task) {
+  const start = new Date();
+  const end = new Date(start.getTime() + 10 * 60 * 1000);
+  try {
+    await taskAction(`/api/tasks/${task.id}/slot`, {start: start.toISOString(), end: end.toISOString()}, 'Unable to start.');
+  } catch {
+    showToast('Could not start the timer for that task.');
+    return;
+  }
+  showToast(`Go! 10 minutes on “${task.text}”. I'll check in when it's up.`);
+  await refreshAll();
 }
 
 function renderTaskRow(task, {showSection = true} = {}) {
@@ -2000,6 +2034,13 @@ function renderTaskRow(task, {showSection = true} = {}) {
   const edit = iconButton('edit', 'Edit', 'secondary', () => openTaskEditor(task, row));
   const del = iconButton('trash', 'Delete', 'danger', () => deleteTask(task, row));
   actions.append(complete, snooze.details, edit, del);
+  if (task.radar && task.radar.level === 'at_risk') {
+    const start = h('button', 'secondary start-ten-btn', '▶ Start 10 min');
+    start.type = 'button';
+    start.title = 'Just start: book 10 minutes from now';
+    start.addEventListener('click', () => startTenMinutes(task));
+    actions.prepend(start);
+  }
 
   const more = menu('more', 'More actions');
   if (!task.due_on && task.suggested_due_on) {

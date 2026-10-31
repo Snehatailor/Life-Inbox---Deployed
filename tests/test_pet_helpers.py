@@ -18,7 +18,7 @@ def run_node(script: str):
         pytest.skip("node is not installed")
     result = subprocess.run(
         [node, "-e", f"const h = require({json.dumps(str(PET_JS))}); {script}"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -107,3 +107,20 @@ def test_pet_page_and_assets_are_served(client):
         assert client.get(path).status_code == 200
     home = client.get("/")
     assert "/static/pet.js" in home.text and "/static/pet.css" in home.text and "petLayer" in home.text
+
+
+def test_radar_nudge_helpers():
+    out = run_node("""
+      const a = {task_id: 4, text: 'Python end term', reasons: ['Due in 2 days', 'Snoozed 2 times', 'x']};
+      const slot = h.tenMinuteSlot(new Date('2026-11-04T09:00:00Z'));
+      console.log(JSON.stringify([
+        h.nudgeKey(a, '2026-11-04'),
+        h.nudgeText(a, 'Mochi'),
+        h.nudgeText({...a, reasons: []}, 'Mochi'),
+        slot,
+      ]));""")
+    assert out[0] == "nudge|4|2026-11-04"
+    assert out[1] == ("Mochi: “Python end term” is slipping (due in 2 days, snoozed 2 times). "
+                      "Want to just start for 10 minutes?")
+    assert "slipping." in out[2]
+    assert out[3] == {"start": "2026-11-04T09:00:00.000Z", "end": "2026-11-04T09:10:00.000Z"}

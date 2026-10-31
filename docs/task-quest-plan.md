@@ -18,6 +18,7 @@ Branch: `game/task-quest` (from `main` @ 6b3681d)
 | 9 Team leaderboard | Done: invite-code teams, opt-in weekly board, points/streak only |
 | 11 Coin shop, pets, desktop companion | Done: 9 pets, wallet, saved time slots with reminders, tap-for-notes, Electron companion (`desktop-pet/`) |
 | 10 Spoken briefing | Done: button, `B` shortcut and "what's due today?" typed or spoken |
+| 12 Procrastination Radar | Done: rule-based risk badge with reasons, snooze history (`task_events`), Start 10 min, pet nudge, +10 rescue bonus (`app/game/radar.py`) |
 
 ## What already exists (we build on it)
 

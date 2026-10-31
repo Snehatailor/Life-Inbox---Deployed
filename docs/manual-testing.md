@@ -203,3 +203,15 @@ Rule: an open task with a deadline is raised to High within 2 days (or when over
 - [ ] The bubble stays fully on screen when the pet is at the left or right edge
 - [ ] While the note panel is open the pet holds reminders back; closing the panel shows them
 - [ ] Today tab: reminder rows have ⏰ (snooze 5 min) beside ✓
+
+## Procrastination Radar
+
+- [ ] Every open task shows a radar badge: 🟢, 🟡 Watch or 🔴 At risk. Hover over it (or tap it) to see the score and each reason with its points
+- [ ] A task due in 17 days with no history is 🟢 with "Nothing is pushing this task yet"
+- [ ] Snooze a task due in 3 days twice (Snooze → Tomorrow): it shows "Snoozed 2 times" and turns 🟡. Undo on the snooze toast takes one snooze back
+- [ ] A red task has **▶ Start 10 min**: it books a 10-minute slot (🕘), the score drops by 15 ("Time slot booked"), and after 10 minutes the pet asks "done, or snooze 5 min?"
+- [ ] Completing a red task shows "+10 rescue bonus" in the toast; Undo takes the bonus back with the coins
+- [ ] A task that is red only because of snoozes gives no rescue bonus
+- [ ] With the pet roaming, a red task gets one nudge per day ("… is slipping. Want to just start for 10 minutes?") after the greeting; **Not now** stops it for today
+- [ ] Done and binned tasks show no badge
+- [ ] Two users (Dev Login on): one user's late history and snoozes never change the other's badges

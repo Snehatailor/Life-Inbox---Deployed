@@ -191,6 +191,18 @@ TaskStatus = Literal["open", "completed", "dismissed"]
 TaskListStatus = Literal["open", "completed", "dismissed", "backlog", "all"]
 
 
+class RadarReason(BaseModel):
+    points: int
+    text: str
+
+
+class TaskRadar(BaseModel):
+    score: int
+    level: Literal["on_track", "watch", "at_risk"]
+    reasons: List[RadarReason]
+    rescue_score: int
+
+
 class Task(BaseModel):
     id: int
     text: str
@@ -223,6 +235,10 @@ class Task(BaseModel):
     source_item_ids: List[int]
     created_at: str
     updated_at: str
+    # Procrastination Radar, on open tasks in list responses.
+    radar: Optional[TaskRadar] = None
+    # Extra coins paid on this completion for rescuing an at-risk task.
+    rescue_bonus: int = 0
 
 
 class TaskPatch(BaseModel):

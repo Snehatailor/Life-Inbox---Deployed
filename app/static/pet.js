@@ -58,7 +58,22 @@
     return hour >= 23 || hour < 6;
   }
 
-  const api = {alertKey, alertText, newAlerts, pickQuip, isSleepyHour, mentionsReminderTime};
+  // Procrastination Radar: the pet nudges about an at-risk task once per day.
+  function nudgeKey(atRisk, day) {
+    return `nudge|${atRisk.task_id}|${day}`;
+  }
+
+  function nudgeText(atRisk, petName) {
+    const task = atRisk.text.length > 60 ? `${atRisk.text.slice(0, 57)}…` : atRisk.text;
+    const why = atRisk.reasons && atRisk.reasons.length ? ` (${atRisk.reasons.slice(0, 2).join(', ').toLowerCase()})` : '';
+    return `${petName}: “${task}” is slipping${why}. Want to just start for 10 minutes?`;
+  }
+
+  function tenMinuteSlot(now) {
+    return {start: now.toISOString(), end: new Date(now.getTime() + 10 * 60 * 1000).toISOString()};
+  }
+
+  const api = {alertKey, alertText, newAlerts, pickQuip, isSleepyHour, mentionsReminderTime, nudgeKey, nudgeText, tenMinuteSlot};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof window === 'undefined') return;
 
@@ -88,11 +103,40 @@
   }
 
   function rememberAlert(reminder) {
+    rememberKey(alertKey(reminder));
+  }
+
+  function rememberKey(key) {
     const seen = seenAlerts();
     const cutoff = Date.now() - 24 * 3600 * 1000;
-    for (const key of Object.keys(seen)) if (seen[key] < cutoff) delete seen[key];
-    seen[alertKey(reminder)] = Date.now();
+    for (const old of Object.keys(seen)) if (seen[old] < cutoff) delete seen[old];
+    seen[key] = Date.now();
     try { localStorage.setItem(ALERT_STORE, JSON.stringify(seen)); } catch { /* storage unavailable */ }
+  }
+
+  function localDay() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  // Only when nothing else is being said: reminders always come first.
+  function maybeNudge() {
+    if (!state || !state.at_risk || activeAlert || alertQueue.length || panelOpen || !els.bubble.hidden) return;
+    const key = nudgeKey(state.at_risk, localDay());
+    if (seenAlerts()[key]) return;
+    rememberKey(key);
+    const atRisk = state.at_risk;
+    say(nudgeText(atRisk, state.pet.name), 60 * 1000, [
+      {label: '▶ Start 10 min', primary: true, run: async () => {
+        await post(`/api/tasks/${atRisk.task_id}/slot`, tenMinuteSlot(new Date()));
+        cheer('Go go go! I\'ll check in after 10 minutes. ⏱️');
+        poll();
+      }},
+      {label: 'Not now', run: async () => {
+        say('OK, I won\'t ask about it again today.', 3000);
+      }}
+    ]);
+    hop();
   }
 
   async function call(path, options) {
@@ -550,6 +594,8 @@
       els.bubble.hidden = true;
     }
     showNextAlert();
+    // Wait past the first poll so the greeting does not cover the nudge.
+    if (!first) maybeNudge();
   }
 
   async function poll() {

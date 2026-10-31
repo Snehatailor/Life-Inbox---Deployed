@@ -32,6 +32,7 @@ from app.attention.dates import today_in_configured_tz
 from app.game.gcal import google_event_url
 from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
+from app.game.radar import HISTORY_DAYS, assess as assess_risk, lateness_by_domain, rescue_bonus
 from app.game.reminders import build_reminders, parse_utc, validate_slot
 from app.game.shop import PETS, STARTER_PET, pet_by_id, spendable_balance
 from app.game.teams import (
@@ -302,6 +303,21 @@ class PointEventRecord(Base):
     )
     points = Column(Integer, nullable=False)
     day = Column(Text, nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class TaskEventRecord(Base):
+    """One snooze, remind-later, reopen or completion. The radar counts these."""
+
+    __tablename__ = "task_events"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    kind = Column(Text, nullable=False)
     created_at = Column(Text, nullable=False)
 
 
@@ -1157,27 +1173,37 @@ def _ensure_task_due_fields(task: TaskRecord) -> None:
     task.due_confidence = parsed.confidence
 
 
+def _task_domain(session, task: TaskRecord, source_item_ids) -> tuple[str, str]:
+    """A person's domain choice, otherwise one detected from the task and its notes."""
+    if task.domain and task.domain_source == "user":
+        return task.domain, "user"
+    source_texts = [
+        " ".join(filter(None, (i.title, i.raw_text)))
+        for i in (
+            session.get(InboxItemRecord, item_id)
+            for item_id in source_item_ids[:3]
+        )
+        if i is not None
+    ]
+    domain, _ = detect_domain(task.text, *source_texts)
+    return domain, "auto"
+
+
+def _task_source_ids(session, task_id: int) -> list[int]:
+    return list(
+        session.scalars(
+            select(TaskSourceItemRecord.item_id)
+            .where(TaskSourceItemRecord.task_id == task_id)
+            .order_by(TaskSourceItemRecord.item_id.asc())
+        ).all()
+    )
+
+
 def _task_to_dict(session, task: TaskRecord) -> dict:
     _ensure_task_due_fields(task)
-    source_item_ids = session.scalars(
-        select(TaskSourceItemRecord.item_id)
-        .where(TaskSourceItemRecord.task_id == task.id)
-        .order_by(TaskSourceItemRecord.item_id.asc())
-    ).all()
+    source_item_ids = _task_source_ids(session, task.id)
     today = today_in_configured_tz()
-    if task.domain and task.domain_source == "user":
-        domain, domain_source = task.domain, "user"
-    else:
-        source_texts = [
-            " ".join(filter(None, (i.title, i.raw_text)))
-            for i in (
-                session.get(InboxItemRecord, item_id)
-                for item_id in source_item_ids[:3]
-            )
-            if i is not None
-        ]
-        domain, _ = detect_domain(task.text, *source_texts)
-        domain_source = "auto"
+    domain, domain_source = _task_domain(session, task, source_item_ids)
     priority = effective_priority(
         task.priority, task.priority_source, task.due_on, today, task.status
     )
@@ -1252,7 +1278,105 @@ def list_tasks_from_db(
                 TaskRecord.text.icontains(search.strip(), autoescape=True)
             )
         tasks = session.scalars(statement).all()
-        return [_task_to_dict(session, task) for task in tasks]
+        results = [_task_to_dict(session, task) for task in tasks]
+        open_results = [t for t in results if _radar_applies(t)]
+        if open_results:
+            pool = (
+                open_results
+                if status_filter == TASK_OPEN and not (search or "").strip()
+                else _open_task_dicts(session, owner_id)
+            )
+            _attach_radar(session, owner_id, open_results, pool)
+        return results
+
+
+SNOOZE_EVENT_KINDS = ("snoozed", "remind_later")
+
+
+def _radar_applies(task: dict) -> bool:
+    return task["status"] == TASK_OPEN and not task["binned_at"]
+
+
+def _open_task_dicts(session, owner_id: int) -> list[dict]:
+    return [
+        _task_to_dict(session, task)
+        for task in session.scalars(
+            select(TaskRecord).where(
+                TaskRecord.owner_user_id == owner_id,
+                TaskRecord.status == TASK_OPEN,
+                TaskRecord.binned_at.is_(None),
+            )
+        ).all()
+    ]
+
+
+def _record_task_event(session, task: TaskRecord, kind: str, now_iso: str) -> None:
+    session.add(
+        TaskEventRecord(
+            owner_user_id=task.owner_user_id,
+            task_id=task.id,
+            kind=kind,
+            created_at=now_iso,
+        )
+    )
+
+
+def _domain_lateness(session, owner_id: int, today) -> dict[str, float]:
+    """How late this person finishes tasks in each domain (last 30 days)."""
+    from app.attention.dates import configured_timezone
+
+    since = (today - timedelta(days=HISTORY_DAYS + 1)).isoformat()
+    finished = session.scalars(
+        select(TaskRecord).where(
+            TaskRecord.owner_user_id == owner_id,
+            TaskRecord.status == "completed",
+            TaskRecord.completed_at.is_not(None),
+            TaskRecord.completed_at >= since,
+            TaskRecord.due_on.is_not(None),
+        )
+    ).all()
+    tz = configured_timezone()
+    rows = []
+    for task in finished:
+        completed = parse_utc(task.completed_at)
+        if completed is None:
+            continue
+        domain, _ = _task_domain(session, task, _task_source_ids(session, task.id))
+        rows.append((domain, task.due_on, completed.astimezone(tz).date()))
+    return lateness_by_domain(rows, today)
+
+
+def _snooze_counts(session, owner_id: int, task_ids: list[int]) -> dict[int, int]:
+    if not task_ids:
+        return {}
+    return dict(
+        session.execute(
+            select(TaskEventRecord.task_id, func.count())
+            .where(
+                TaskEventRecord.owner_user_id == owner_id,
+                TaskEventRecord.task_id.in_(task_ids),
+                TaskEventRecord.kind.in_(SNOOZE_EVENT_KINDS),
+            )
+            .group_by(TaskEventRecord.task_id)
+        ).all()
+    )
+
+
+def _attach_radar(session, owner_id: int, targets: list[dict], pool: list[dict]) -> None:
+    """Add a `radar` score to each open task. History is loaded once per call."""
+    today = today_in_configured_tz()
+    now = datetime.now(timezone.utc)
+    lateness = _domain_lateness(session, owner_id, today)
+    snoozes = _snooze_counts(session, owner_id, [t["id"] for t in targets])
+    for task in targets:
+        task["radar"] = assess_risk(
+            task,
+            snoozes=snoozes.get(task["id"], 0),
+            domain_lateness=lateness,
+            open_tasks=pool,
+            today=today,
+            now=now,
+        )
 
 
 def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
@@ -1264,6 +1388,7 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         task = _owned_task(session, task_id, owner_id)
         if task is None:
             return None
+        bonus = 0
         if task.status != task_status:
             now = datetime.now(timezone.utc)
             today = today_in_configured_tz()
@@ -1275,6 +1400,14 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
                     task.due_on,
                     today,
                 )
+                if task.status == TASK_OPEN and not task.binned_at:
+                    before = _task_to_dict(session, task)
+                    _attach_radar(
+                        session, owner_id, [before], _open_task_dicts(session, owner_id)
+                    )
+                    bonus = rescue_bonus(before["radar"]["rescue_score"])
+                    points += bonus
+                _record_task_event(session, task, "completed", now.isoformat())
                 task.points_awarded = points
                 task.completed_at = now.isoformat()
                 session.add(
@@ -1296,10 +1429,20 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
                 )
                 task.points_awarded = None
                 task.completed_at = None
+                _record_task_event(
+                    session,
+                    task,
+                    "reopened" if task_status == TASK_OPEN else "dismissed",
+                    now.isoformat(),
+                )
             task.status = task_status
             task.updated_at = now.isoformat()
             session.commit()
-        return _task_to_dict(session, task)
+        result = _task_to_dict(session, task)
+        if _radar_applies(result):
+            _attach_radar(session, owner_id, [result], _open_task_dicts(session, owner_id))
+        result["rescue_bonus"] = bonus
+        return result
 
 
 def set_item_domain(item_id: int, domain: Optional[str]) -> Optional[dict]:
@@ -1661,6 +1804,7 @@ def postpone_task_slot(task_id: int, minutes: int) -> Optional[dict]:
         task.slot_end = (start + length).isoformat()
         task.slot_set_at = now.isoformat()
         task.updated_at = now.isoformat()
+        _record_task_event(session, task, "remind_later", now.isoformat())
         session.commit()
         return _task_to_dict(session, task)
 
@@ -1806,7 +1950,27 @@ def pet_state_from_db() -> dict:
         "overdue_count": sum(
             1 for t in tasks if t.get("days_left") is not None and t["days_left"] < 0
         ),
+        "at_risk": _riskiest_task(tasks, today),
         "now": now.isoformat(),
+    }
+
+
+def _riskiest_task(tasks: list[dict], today_iso: str) -> Optional[dict]:
+    """The open, awake task the radar is most worried about, for the pet's nudge."""
+    red = [
+        t
+        for t in tasks
+        if (t.get("radar") or {}).get("level") == "at_risk"
+        and not (t.get("snoozed_until") and t["snoozed_until"][:10] > today_iso)
+    ]
+    if not red:
+        return None
+    top = max(red, key=lambda t: (t["radar"]["score"], -t["id"]))
+    return {
+        "task_id": top["id"],
+        "text": top["text"],
+        "score": top["radar"]["score"],
+        "reasons": [r["text"] for r in top["radar"]["reasons"] if r["points"] > 0][:3],
     }
 
 
@@ -2186,9 +2350,26 @@ def snooze_task_in_db(task_id: int, until_iso_date: str) -> Optional[dict]:
         task = _owned_task(session, task_id, owner_id)
         if task is None:
             return None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        today = today_in_configured_tz().isoformat()
+        if until_iso_date[:10] > today:
+            _record_task_event(session, task, "snoozed", now_iso)
+        else:
+            # Waking a task (or Undo) on the day it was snoozed takes that snooze back.
+            latest = session.scalars(
+                select(TaskEventRecord)
+                .where(
+                    TaskEventRecord.task_id == task.id,
+                    TaskEventRecord.kind == "snoozed",
+                )
+                .order_by(TaskEventRecord.id.desc())
+                .limit(1)
+            ).first()
+            if latest is not None and latest.created_at[:10] == now_iso[:10]:
+                session.delete(latest)
         task.snoozed_until = until_iso_date
         task.reminder_at = until_iso_date
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = now_iso
         session.commit()
         return _task_to_dict(session, task)
 
