@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -121,6 +122,13 @@ app = FastAPI(title="Life Inbox")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 init_db()
+
+
+@app.on_event("startup")
+def _start_desktop_pet() -> None:
+    from app.pet_launcher import launch_pet
+
+    launch_pet(int(os.environ.get("PORT", "8000")))
 
 _OPEN_API_PATHS = ("/api/health", "/api/auth/")
 

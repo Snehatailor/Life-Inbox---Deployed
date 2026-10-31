@@ -63,11 +63,17 @@ project is updated later, run `python -m alembic upgrade head` again before star
 
 ## Optional: the roaming desktop pet
 
-Keep the app running, then open a **second** terminal:
+Install it once (needs Node.js):
 
 ```bash
 cd desktop-pet
 npm install
+```
+
+After that the pet **starts by itself whenever the server starts** (one copy only). To stop that, set `LIFE_INBOX_LAUNCH_PET=false` before starting the server. To start it by hand instead, open a second terminal:
+
+```bash
+cd desktop-pet
 npm start
 ```
 
