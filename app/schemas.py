@@ -251,6 +251,10 @@ class SlotRequest(BaseModel):
     end: str = Field(min_length=10, max_length=40)
 
 
+class RemindLater(BaseModel):
+    minutes: int = Field(default=5, ge=1, le=240)
+
+
 class ShopBuy(BaseModel):
     item_id: str = Field(min_length=1, max_length=40)
 

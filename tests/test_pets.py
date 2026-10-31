@@ -168,3 +168,32 @@ def test_each_person_has_their_own_wallet_and_pet(app_env):
     assert ben.get("/api/shop").json()["active_pet"] == "cat"
     assert ben.post("/api/pet/select", json={"pet_id": "dog"}).status_code == 400  # Ana's purchase isn't Ben's
     assert ben.get("/api/pet/state").json()["pet"]["id"] == "cat"
+
+
+def test_remind_later_moves_the_slot_and_keeps_its_length(client):
+    task = client.post("/api/tasks/quick", json={"sentence": "Send the meeting link in 20 minutes"}).json()
+    first = datetime.fromisoformat(task["slot_start"])
+    length = datetime.fromisoformat(task["slot_end"]) - first
+
+    later = client.post(f"/api/tasks/{task['id']}/remind-later", json={"minutes": 5}).json()
+    start = datetime.fromisoformat(later["slot_start"])
+    assert 4 <= (start - datetime.now(timezone.utc)).total_seconds() / 60 <= 5.1
+    assert datetime.fromisoformat(later["slot_end"]) - start == length  # same length as before
+    assert later["slot_set_at"]
+
+    # it was just snoozed, so the pet waits for the time instead of a pointless heads-up
+    reminders = client.get("/api/pet/state").json()["reminders"]
+    assert [(r["task_id"], r["lead_minutes"]) for r in reminders] == [(task["id"], 5)]
+
+
+def test_remind_later_works_on_a_task_with_no_slot_and_validates(client):
+    task = client.post("/api/tasks/quick", json={"sentence": "Order lunch"}).json()
+    assert task["slot_start"] is None
+    later = client.post(f"/api/tasks/{task['id']}/remind-later", json={}).json()  # default 5 minutes
+    assert later["slot_start"] is not None
+
+    assert client.post(f"/api/tasks/{task['id']}/remind-later", json={"minutes": 0}).status_code == 422
+    assert client.post(f"/api/tasks/{task['id']}/remind-later", json={"minutes": 999}).status_code == 422
+    assert client.post("/api/tasks/9999/remind-later", json={"minutes": 5}).status_code == 404
+    client.post(f"/api/tasks/{task['id']}/complete")
+    assert client.post(f"/api/tasks/{task['id']}/remind-later", json={"minutes": 5}).status_code == 400

@@ -7,6 +7,7 @@ SOON_MINUTES = 10
 MISSED_WINDOW_MINUTES = 120
 LOOKAHEAD_HOURS = 24
 MAX_SLOT_HOURS = 8
+DEFAULT_SLOT_MINUTES = 15
 
 
 def parse_utc(value: Optional[str]) -> Optional[datetime]:

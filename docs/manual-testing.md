@@ -193,3 +193,13 @@ Rule: an open task with a deadline is raised to High within 2 days (or when over
 - [ ] "i need to send a link in 20 minutes. remind me in 5 mins" reminds at 5 minutes (the "remind me" time wins)
 - [ ] "call mom at 5pm" and "pay the bill tomorrow at 9am" use your own time zone; a time already past today with "today" in the sentence makes no reminder
 - [ ] Typing a time in the pet's note box shows "That has a time. Press Make task…"; "Save note" never creates a reminder
+
+## Pet asks: done or snooze 5 min?
+
+- [ ] When a reminder is due the pet's bubble says "…Is it done, or snooze 5 min?" with **✓ Done** and **⏰ 5 min**; for an early heads-up it says "Ready? Or snooze 5 min?"
+- [ ] **✓ Done** completes the task (coins awarded, the pet cheers) and the next waiting reminder is asked
+- [ ] **⏰ 5 min** moves the slot 5 minutes later (same length), the task stays open, and the pet asks again at the new time without a heads-up in between
+- [ ] Two reminders at once: the bubble shows "(+1 more)" and the second is asked after the first is answered
+- [ ] The bubble stays fully on screen when the pet is at the left or right edge
+- [ ] While the note panel is open the pet holds reminders back; closing the panel shows them
+- [ ] Today tab: reminder rows have ⏰ (snooze 5 min) beside ✓

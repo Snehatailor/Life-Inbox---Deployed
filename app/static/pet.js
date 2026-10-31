@@ -259,6 +259,7 @@
       showTab('note');
     }
     els.wrap.classList.toggle('pet-panel-open', open);
+    if (!open) setTimeout(showNextAlert, 300);
     if (bridge && bridge.setFocusable) bridge.setFocusable(open);
   }
 
@@ -276,7 +277,7 @@
     const list = els.panel.querySelector('.pp-list');
     list.replaceChildren();
     if (!state) { list.append(el('p', 'pp-empty', 'Loading…')); return; }
-    const make = (text, meta, taskId) => {
+    const make = (text, meta, taskId, isReminder = false) => {
       const row = el('div', 'pp-item');
       const info = el('div', 'pp-info');
       info.append(el('div', 'pp-task-text', text), el('small', 'pp-meta', meta));
@@ -289,11 +290,20 @@
           try { await call(`/api/tasks/${taskId}/complete`, {method: 'POST'}); cheer('Well done! 🎉'); poll(); } catch { status('Could not complete that.'); }
         });
         row.append(done);
+        if (isReminder) {
+          const later = el('button', 'pp-later secondary', '⏰');
+          later.title = 'Remind me again in 5 minutes';
+          later.setAttribute('aria-label', `Snooze 5 minutes: ${text}`);
+          later.addEventListener('click', async () => {
+            try { await post(`/api/tasks/${taskId}/remind-later`, {minutes: 5}); say('OK, in 5 minutes. ⏰', 3000); poll(); } catch { status('Could not snooze that.'); }
+          });
+          row.insertBefore(later, done);
+        }
       }
       list.append(row);
     };
     for (const r of state.reminders) {
-      make(r.text, `${r.phase === 'missed' ? 'Missed' : r.phase === 'now' ? 'Now' : 'Slot'} · ${r.label}`, r.task_id);
+      make(r.text, `${r.phase === 'missed' ? 'Missed' : r.phase === 'now' ? 'Now' : 'Slot'} · ${r.label}`, r.task_id, true);
     }
     for (const t of state.due_today) make(t.text, `Due today · ${t.priority}`, t.task_id);
     if (!list.children.length) {
@@ -301,12 +311,67 @@
     }
   }
 
-  function say(text, ms = 7000) {
+  // A speech bubble. `actions` adds buttons ({label, primary, run}) and keeps it up longer.
+  function say(text, ms = 7000, actions = null, onClose = null) {
     if (!text) return;
-    els.bubble.textContent = text;
+    els.bubble.replaceChildren(el('div', 'pb-text', text));
+    if (actions) {
+      const row = el('div', 'pb-actions');
+      for (const action of actions) {
+        const button = el('button', action.primary ? 'pb-primary' : '', action.label);
+        button.type = 'button';
+        button.addEventListener('click', async () => {
+          row.querySelectorAll('button').forEach(b => { b.disabled = true; });
+          try { await action.run(); } catch { say('Hmm, that did not work. Is Life Inbox running?', 4000); }
+        });
+        row.append(button);
+      }
+      els.bubble.append(row);
+    }
     els.bubble.hidden = false;
     clearTimeout(bubbleTimer);
-    bubbleTimer = setTimeout(() => { els.bubble.hidden = true; }, ms);
+    bubbleTimer = setTimeout(() => {
+      els.bubble.hidden = true;
+      if (onClose) onClose();
+    }, ms);
+  }
+
+  // Reminders wait in a queue so two at once don't hide each other.
+  let alertQueue = [];
+  let activeAlert = null;
+
+  function reminderActions(reminder) {
+    return [
+      {label: '✓ Done', primary: true, run: async () => {
+        await call(`/api/tasks/${reminder.task_id}/complete`, {method: 'POST'});
+        activeAlert = null;
+        cheer('Well done! 🎉');
+        poll();
+        setTimeout(showNextAlert, 1500);
+      }},
+      {label: '⏰ 5 min', run: async () => {
+        const task = await post(`/api/tasks/${reminder.task_id}/remind-later`, {minutes: 5});
+        const at = new Date(task.slot_start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        activeAlert = null;
+        say(`OK, I'll ask again at ${at}. ⏰`, 4000);
+        poll();
+        setTimeout(showNextAlert, 4200);
+      }}
+    ];
+  }
+
+  function showNextAlert() {
+    if (activeAlert || !alertQueue.length || !els.bubble || panelOpen) return;
+    activeAlert = alertQueue.shift();
+    const question = alertText(activeAlert, state ? state.pet.name : 'Pet');
+    const more = alertQueue.length ? ` (+${alertQueue.length} more)` : '';
+    const ask = activeAlert.phase === 'soon' ? 'Ready? Or snooze 5 min?' : 'Is it done, or snooze 5 min?';
+    say(`${question}${more}\n${ask}`, 3 * 60 * 1000, reminderActions(activeAlert), () => {
+      activeAlert = null;
+      showNextAlert();
+    });
+    chime(activeAlert.phase === 'now');
+    hop();
   }
 
   function chime(big) {
@@ -330,7 +395,19 @@
 
   // ---------- Movement ----------
 
+  // Keep the speech bubble fully on screen when the pet is near an edge.
+  function placeBubble() {
+    if (els.bubble.hidden) return;
+    const {w} = bounds();
+    const width = els.bubble.offsetWidth;
+    const centre = pos.x + PET_SIZE / 2;
+    const left = Math.min(Math.max(8, centre - width / 2), w - width - 8);
+    const shift = Math.round(left - (centre - width / 2));
+    els.bubble.style.setProperty('--shift', `${shift}px`);
+  }
+
   function render() {
+    placeBubble();
     const flip = facing === 1 ? 1 : -1;
     els.wrap.style.transform = `translate3d(${Math.round(pos.x)}px, ${Math.round(pos.y)}px, 0)`;
     els.body.style.setProperty('--flip', String(flip));
@@ -458,16 +535,21 @@
 
     const seen = seenAlerts();
     const fresh = newAlerts(state.reminders, seen);
-    if (fresh.length) {
-      const top = fresh[0];
-      const text = alertText(top, state.pet.name);
-      say(text, 25000);
-      chime(top.phase === 'now');
-      hop();
+    for (const reminder of fresh) {
+      rememberAlert(reminder);
+      alertQueue.push(reminder);
+      const text = alertText(reminder, state.pet.name);
       if (bridge && bridge.notify) bridge.notify(`${state.pet.emoji} ${state.pet.name}`, text.replace(`${state.pet.name}: `, ''));
       else if (window.Notification && Notification.permission === 'granted') new Notification(`${state.pet.emoji} ${state.pet.name}`, {body: text});
-      fresh.forEach(rememberAlert);
     }
+    // a reminder that was finished or moved elsewhere no longer needs asking about
+    const live = new Set(state.reminders.map(alertKey));
+    alertQueue = alertQueue.filter(r => live.has(alertKey(r)));
+    if (activeAlert && !live.has(alertKey(activeAlert))) {
+      activeAlert = null;
+      els.bubble.hidden = true;
+    }
+    showNextAlert();
   }
 
   async function poll() {
@@ -514,6 +596,8 @@
     els = {};
     state = null;
     lastCoins = null;
+    alertQueue = [];
+    activeAlert = null;
   }
 
   window.LifeInboxPet = {

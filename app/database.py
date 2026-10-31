@@ -1638,6 +1638,33 @@ def set_task_slot(task_id: int, start: Optional[str], end: Optional[str]) -> Opt
         return _task_to_dict(session, task)
 
 
+def postpone_task_slot(task_id: int, minutes: int) -> Optional[dict]:
+    """Move a task's reminder to `minutes` from now, keeping its length ("snooze 5 min")."""
+    from app.game.reminders import DEFAULT_SLOT_MINUTES
+
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be reminded about")
+        old_start, old_end = parse_utc(task.slot_start), parse_utc(task.slot_end)
+        length = (
+            old_end - old_start
+            if old_start and old_end and old_end > old_start
+            else timedelta(minutes=DEFAULT_SLOT_MINUTES)
+        )
+        start = now + timedelta(minutes=minutes)
+        task.slot_start = start.isoformat()
+        task.slot_end = (start + length).isoformat()
+        task.slot_set_at = now.isoformat()
+        task.updated_at = now.isoformat()
+        session.commit()
+        return _task_to_dict(session, task)
+
+
 def _pet_settings(session, owner_id: int) -> "PetSettingsRecord":
     settings = session.get(PetSettingsRecord, owner_id)
     if settings is None:

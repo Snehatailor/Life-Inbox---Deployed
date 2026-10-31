@@ -96,6 +96,7 @@ from app.schemas import (
     PetSelect,
     PetSettingsPatch,
     QuickTaskRequest,
+    RemindLater,
     ShopBuy,
     SlotRequest,
     TaskPatch,
@@ -1122,6 +1123,19 @@ def save_task_slot(task_id: int, payload: SlotRequest):
 
     try:
         task = set_task_slot(task_id, payload.start, payload.end)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.post("/api/tasks/{task_id}/remind-later", response_model=Task)
+def remind_task_later(task_id: int, payload: RemindLater):
+    from app.database import postpone_task_slot
+
+    try:
+        task = postpone_task_slot(task_id, payload.minutes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if task is None:
