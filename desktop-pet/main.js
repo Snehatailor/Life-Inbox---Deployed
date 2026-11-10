@@ -20,6 +20,17 @@ function workArea() {
   return screen.getPrimaryDisplay().workArea;
 }
 
+// On Windows the 'floating' level only sits behind the taskbar and is not truly
+// topmost, so other apps cover the pet. 'screen-saver' stays above them.
+function keepOnTop() {
+  if (win) win.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating');
+}
+
+function showPet() {
+  win.showInactive();
+  keepOnTop();
+}
+
 function createWindow() {
   const { x, y, width, height } = workArea();
   win = new BrowserWindow({
@@ -41,7 +52,7 @@ function createWindow() {
       backgroundThrottling: false
     }
   });
-  win.setAlwaysOnTop(true, 'floating');
+  keepOnTop();
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
 
@@ -78,7 +89,7 @@ function createWindow() {
     retryTimer = setTimeout(() => win && win.loadURL(`${BASE_URL}/pet`), RETRY_MS);
   });
 
-  win.once('ready-to-show', () => win.showInactive());
+  win.once('ready-to-show', showPet);
   win.loadURL(`${BASE_URL}/pet`);
 }
 
@@ -90,7 +101,7 @@ function createTray() {
   const toggle = () => {
     if (!win) return;
     if (win.isVisible()) win.hide();
-    else win.showInactive();
+    else showPet();
   };
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -111,6 +122,7 @@ ipcMain.on('pet:interactive', (event, interactive) => {
 ipcMain.on('pet:focusable', (event, focusable) => {
   if (!win || event.sender !== win.webContents) return;
   win.setFocusable(focusable);
+  keepOnTop();
   if (focusable) win.focus();
   else win.blur();
 });

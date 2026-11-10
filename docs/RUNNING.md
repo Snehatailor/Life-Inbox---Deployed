@@ -63,11 +63,17 @@ project is updated later, run `python -m alembic upgrade head` again before star
 
 ## Optional: the roaming desktop pet
 
-Keep the app running, then open a **second** terminal:
+Install it once (needs Node.js):
 
 ```bash
 cd desktop-pet
 npm install
+```
+
+After that the pet **starts by itself whenever the server starts** (one copy only). To stop that, set `LIFE_INBOX_LAUNCH_PET=false` before starting the server. To start it by hand instead, open a second terminal:
+
+```bash
+cd desktop-pet
 npm start
 ```
 
@@ -77,9 +83,9 @@ the tray / menu-bar icon. See `desktop-pet/README.md`.
 Another address? In PowerShell: `$env:LIFE_INBOX_URL="http://127.0.0.1:9000"` then
 `npm start`. On macOS/Linux: `LIFE_INBOX_URL=http://127.0.0.1:9000 npm start`.
 
-It has been built and tested on macOS. Transparent, always-on-top, click-through windows
-are supported on Windows too, but it is untested there; native notification pop-ups on
-Windows may need extra settings, so rely on the pet's speech bubble.
+It has been built and tested on macOS. On Windows it starts with the server and stays
+above other apps; native notification pop-ups on Windows may need extra settings, so rely
+on the pet's speech bubble.
 
 ## Good to know
 
