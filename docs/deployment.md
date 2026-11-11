@@ -82,6 +82,39 @@ Install Postgres driver when using compose: `pip install 'psycopg[binary]'`
 (or add to a private requirements overlay). The base `requirements.txt`
 stays SQLite-friendly for local teaching.
 
+## Email + password accounts
+
+`POST /api/auth/register` and `POST /api/auth/login` take
+`{"email", "password"}` (register also takes an optional `display_name`).
+Passwords are at least 8 characters and are stored only as salted scrypt
+hashes in `users.password_hash`. Ten failed sign-ins for one email within 15
+minutes return 429 until the window passes (in-memory, per process).
+`GET /api/auth/config` tells the page which sign-in options to show.
+
+Set `LIFE_INBOX_AUTH_MODE=password` with `LIFE_INBOX_ENV=beta` for a public
+deployment: anonymous visitors see only the sign-in form, and every account
+gets its own private inbox.
+
+## Render (web service + Postgres)
+
+| Setting | Value |
+| --- | --- |
+| Runtime | Python, `PYTHON_VERSION=3.12.10` |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/api/health` |
+
+Environment: `LIFE_INBOX_ENV=beta`, `LIFE_INBOX_AUTH_MODE=password`,
+`LIFE_INBOX_ALLOW_DEV_LOGIN=0`, a random 32+ character
+`LIFE_INBOX_SESSION_SECRET`, `DATABASE_URL` set to the Render Postgres
+internal URL (a `postgres://` URL is converted to `postgresql+psycopg://`
+automatically), and `LIFE_INBOX_UPLOAD_DIR=/tmp/life_inbox_uploads`.
+
+Without a persistent disk, uploaded PDF, image and audio files are lost
+when the service restarts or redeploys. Their extracted text stays in
+Postgres. Attach a Render disk and point `LIFE_INBOX_UPLOAD_DIR` at it to
+keep the files.
+
 ## Migrations / backups / rollback
 
 - Alembic is the only schema owner: `alembic upgrade head`

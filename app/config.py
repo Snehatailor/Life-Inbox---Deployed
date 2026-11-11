@@ -16,7 +16,7 @@ class AppConfig:
     database_url: str
     upload_dir: str
     session_secret: str
-    auth_mode: str  # dev | google_stub
+    auth_mode: str  # dev | google_stub | password
     environment: str  # local | beta | production
     max_upload_mb: int
     allow_dev_login: bool
@@ -31,16 +31,24 @@ class AppConfig:
         return self.database_url.startswith("postgresql")
 
 
+def normalize_database_url(url: str) -> str:
+    """Point hosted Postgres URLs (postgres://, postgresql://) at psycopg 3."""
+    url = (url or "").strip()
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 def _truthy(name: str, default: str = "") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes"}
 
 
 def load_config(*, strict: Optional[bool] = None) -> AppConfig:
     environment = os.getenv("LIFE_INBOX_ENV", "local").strip() or "local"
-    database_url = os.getenv(
-        "DATABASE_URL",
-        "sqlite:///./data/life_inbox.db",
-    ).strip()
+    database_url = normalize_database_url(
+        os.getenv("DATABASE_URL", "sqlite:///./data/life_inbox.db")
+    )
     upload_dir = os.getenv("LIFE_INBOX_UPLOAD_DIR", "./data/uploads").strip()
     session_secret = os.getenv("LIFE_INBOX_SESSION_SECRET", "").strip()
     auth_mode = os.getenv("LIFE_INBOX_AUTH_MODE", "dev").strip() or "dev"
@@ -66,8 +74,10 @@ def load_config(*, strict: Optional[bool] = None) -> AppConfig:
             "LIFE_INBOX_SESSION_SECRET must be at least 32 characters in "
             "beta/production."
         )
-    if auth_mode not in {"dev", "google_stub"}:
-        errors.append("LIFE_INBOX_AUTH_MODE must be 'dev' or 'google_stub'.")
+    if auth_mode not in {"dev", "google_stub", "password"}:
+        errors.append(
+            "LIFE_INBOX_AUTH_MODE must be 'dev', 'google_stub' or 'password'."
+        )
     if environment in {"beta", "production"} and allow_dev_login and auth_mode == "dev":
         errors.append(
             "Dev login must be disabled in beta/production "

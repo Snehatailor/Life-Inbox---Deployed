@@ -211,6 +211,47 @@ def auth_dev_login(payload: dict, response: Response):
     return user
 
 
+@app.get("/api/auth/config")
+def auth_config():
+    """What the sign-in UI should offer. Contains no user data."""
+    from app.auth import PASSWORD_MIN_LENGTH
+    from app.config import load_config
+
+    config = load_config(strict=False)
+    return {
+        "environment": config.environment,
+        "allow_dev_login": config.allow_dev_login,
+        "password_login": True,
+        "password_min_length": PASSWORD_MIN_LENGTH,
+        "anonymous_local_owner": config.environment == "local",
+    }
+
+
+@app.post("/api/auth/register")
+def auth_register(payload: dict, response: Response):
+    from app.auth import register_password_user, set_session_cookie
+
+    user = register_password_user(
+        str(payload.get("email", "")),
+        str(payload.get("password", "")),
+        display_name=payload.get("display_name"),
+    )
+    set_session_cookie(response, user["id"])
+    return user
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict, response: Response):
+    from app.auth import password_login_user, set_session_cookie
+
+    user = password_login_user(
+        str(payload.get("email", "")),
+        str(payload.get("password", "")),
+    )
+    set_session_cookie(response, user["id"])
+    return user
+
+
 @app.post("/api/auth/logout")
 def auth_logout(response: Response):
     from app.auth import clear_session_cookie

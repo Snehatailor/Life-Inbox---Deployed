@@ -75,3 +75,5 @@ ul { padding-left: 22px; }
   .search-toolbar input[type="search"] { min-width: 100%; }
   .topic-form input { min-width: 100%; }
 }
+
+[hidden] { display: none !important; }

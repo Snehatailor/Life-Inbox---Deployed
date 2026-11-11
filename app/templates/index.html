@@ -12,16 +12,38 @@
     <p class="sub">Capture first. Organize the whole inbox with AI when you are ready.</p>
     <div class="auth-bar">
       <span id="authUser" class="muted">Checking session…</span>
-      <form id="devLoginForm" class="auth-form" onsubmit="devLogin(event)">
+      <button id="signOutButton" type="button" class="secondary" onclick="logoutSession()" hidden>Sign out</button>
+      <form id="passwordForm" class="auth-form" onsubmit="passwordAuth(event)" hidden>
         <label>
-          Dev login email
+          Email
+          <input id="authEmail" type="email" maxlength="200" autocomplete="email" placeholder="you@example.com" required />
+        </label>
+        <label>
+          Password
+          <input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" required />
+        </label>
+        <label id="authNameLabel" hidden>
+          Name (optional)
+          <input id="authName" type="text" maxlength="100" autocomplete="name" />
+        </label>
+        <button id="authSubmit" type="submit">Sign in</button>
+        <button id="authModeToggle" type="button" class="secondary" onclick="toggleAuthMode()">Create an account</button>
+      </form>
+      <form id="devLoginForm" class="auth-form" onsubmit="devLogin(event)" hidden>
+        <label>
+          Dev login email (no password, local testing only)
           <input id="devLoginEmail" type="email" maxlength="200" placeholder="you@example.com" required />
         </label>
-        <button type="submit" class="secondary">Sign in</button>
-        <button type="button" class="secondary" onclick="logoutSession()">Sign out</button>
+        <button type="submit" class="secondary">Dev sign in</button>
       </form>
       <p id="authStatus" class="status muted" role="status" aria-live="polite"></p>
     </div>
+
+    <div id="signedOutNotice" class="auth-bar" hidden>
+      <p>Sign in or create an account to use your private inbox. Each account only sees its own notes.</p>
+    </div>
+
+    <div id="appContent" hidden>
 
     <textarea id="noteText" placeholder="Example: Met Rohan yesterday. He recommended Atomic Habits. Need to order it this weekend. Also ask him about that Gurgaon restaurant."></textarea>
     <br />
@@ -167,6 +189,7 @@
     </form>
     <p id="searchStatus" class="status muted" role="status" aria-live="polite"></p>
     <div id="notes"></div>
+    </div>
   </div>
 
   <script src="/static/pagination_state.js"></script>

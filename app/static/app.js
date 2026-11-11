@@ -1410,13 +1410,107 @@ async function previewCalendarForTask(task) {
   }
 }
 
+let authConfig = {allow_dev_login: false, anonymous_local_owner: false};
+let authMode = 'login';
+let currentUser = null;
+
+async function loadAuthConfig() {
+  try {
+    authConfig = await fetchJson('/api/auth/config', {}, 'Unable to load sign-in options.');
+  } catch {
+    // Keep safe defaults: password sign-in only.
+  }
+}
+
+function applyAuthState() {
+  // A real account (not the anonymous local owner) is signed in.
+  const signedInAccount = Boolean(currentUser) && currentUser.auth_provider !== 'local';
+  const canUseApp = Boolean(currentUser);
+  document.getElementById('authUser').textContent = currentUser
+    ? `Signed in as ${currentUser.display_name} <${currentUser.email}>`
+    : 'Not signed in';
+  document.getElementById('signOutButton').hidden = !signedInAccount;
+  document.getElementById('passwordForm').hidden = signedInAccount;
+  document.getElementById('devLoginForm').hidden = signedInAccount || !authConfig.allow_dev_login;
+  document.getElementById('appContent').hidden = !canUseApp;
+  document.getElementById('signedOutNotice').hidden = canUseApp;
+}
+
 async function loadAuthUser() {
   try {
-    const user = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
-    document.getElementById('authUser').textContent =
-      `Signed in as ${user.display_name} <${user.email}> (${user.auth_provider})`;
+    currentUser = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
   } catch {
-    document.getElementById('authUser').textContent = 'Not signed in';
+    currentUser = null;
+  }
+  applyAuthState();
+  return currentUser;
+}
+
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  const registering = authMode === 'register';
+  document.getElementById('authSubmit').textContent = registering ? 'Create account' : 'Sign in';
+  document.getElementById('authModeToggle').textContent = registering
+    ? 'I already have an account'
+    : 'Create an account';
+  document.getElementById('authNameLabel').hidden = !registering;
+  document.getElementById('authPassword').autocomplete = registering
+    ? 'new-password'
+    : 'current-password';
+  setStatus('authStatus', '');
+}
+
+async function postAuth(url, body) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error('Could not reach the server.');
+  }
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const detail = data && typeof data.detail === 'string' ? data.detail : 'Sign-in failed.';
+    throw new Error(detail);
+  }
+  return data;
+}
+
+async function reloadInboxForUser() {
+  await loadAuthUser();
+  if (!currentUser) return;
+  await loadLatestAnalysis();
+  await loadNotes();
+  await loadTasks();
+  await loadTopics();
+  await loadAttention();
+  await loadDashboard();
+}
+
+async function passwordAuth(event) {
+  event.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return;
+  const registering = authMode === 'register';
+  const body = registering
+    ? {email, password, display_name: document.getElementById('authName').value.trim()}
+    : {email, password};
+  try {
+    const user = await postAuth(registering ? '/api/auth/register' : '/api/auth/login', body);
+    document.getElementById('authPassword').value = '';
+    setStatus('authStatus', registering ? `Account created for ${user.email}.` : `Signed in as ${user.email}.`);
+    await reloadInboxForUser();
+  } catch (error) {
+    setStatus('authStatus', error.message || 'Sign-in failed.', true);
   }
 }
 
@@ -1425,22 +1519,9 @@ async function devLogin(event) {
   const email = document.getElementById('devLoginEmail').value.trim();
   if (!email) return;
   try {
-    const user = await fetchJson(
-      '/api/auth/dev-login',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email})
-      },
-      'Unable to sign in.'
-    );
+    const user = await postAuth('/api/auth/dev-login', {email});
     setStatus('authStatus', `Signed in as ${user.email}`);
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-    await loadDashboard();
+    await reloadInboxForUser();
   } catch {
     setStatus('authStatus', 'Sign-in failed (dev login may be disabled).', true);
   }
@@ -1450,27 +1531,29 @@ async function logoutSession() {
   try {
     await fetchJson('/api/auth/logout', {method: 'POST'}, 'Unable to sign out.');
     setStatus('authStatus', 'Signed out.');
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-    await loadDashboard();
+    await reloadInboxForUser();
   } catch {
     setStatus('authStatus', 'Sign-out failed.', true);
   }
 }
 
-syncControlsFromUrl();
-loadAuthUser();
-loadNotes();
-loadLatestAnalysis();
-loadTasks();
-loadTopics();
-loadDashboard();
-loadAttention();
+async function initApp() {
+  syncControlsFromUrl();
+  await loadAuthConfig();
+  const user = await loadAuthUser();
+  if (!user) return;
+  loadNotes();
+  loadLatestAnalysis();
+  loadTasks();
+  loadTopics();
+  loadDashboard();
+  loadAttention();
+}
+
+initApp();
 
 window.addEventListener('popstate', () => {
+  if (!currentUser) return;
   syncControlsFromUrl();
   loadNotes();
   loadTasks();

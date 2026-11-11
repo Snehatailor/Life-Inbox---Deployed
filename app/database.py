@@ -24,6 +24,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.capture.pipeline import (
@@ -39,12 +40,15 @@ from app.capture.pipeline import (
     VOICE_ITEM_TYPE,
 )
 from app.capture.storage import delete_stored_file
+from app.config import normalize_database_url
 from app.similarity import find_item_relations
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "life_inbox.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DB_PATH}"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+DATABASE_URL = normalize_database_url(
+    os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+)
 AUTO_CREATE_TABLES = os.getenv(
     "LIFE_INBOX_AUTO_CREATE_TABLES", ""
 ).strip().lower() in {"1", "true", "yes"}
@@ -94,6 +98,8 @@ class UserRecord(Base):
     display_name = Column(Text, nullable=False)
     auth_provider = Column(Text, nullable=False)
     created_at = Column(Text, nullable=False)
+    # Only set for email + password accounts. Never returned to clients.
+    password_hash = Column(Text, nullable=True)
 
 
 class InboxItemRecord(Base):
@@ -332,6 +338,50 @@ def ensure_user(
             session.add(user)
             session.commit()
         return _user_to_dict(user)
+
+
+class UserAlreadyExistsError(ValueError):
+    """An account with this email already exists."""
+
+
+def create_password_user(
+    *,
+    email: str,
+    display_name: str,
+    password_hash: str,
+) -> dict:
+    cleaned = email.strip().lower()
+    with SessionLocal() as session:
+        existing = session.scalar(
+            select(UserRecord).where(UserRecord.email == cleaned)
+        )
+        if existing is not None:
+            raise UserAlreadyExistsError(cleaned)
+        user = UserRecord(
+            email=cleaned,
+            display_name=display_name.strip() or cleaned.split("@", 1)[0],
+            auth_provider="password",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            password_hash=password_hash,
+        )
+        session.add(user)
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise UserAlreadyExistsError(cleaned) from exc
+        return _user_to_dict(user)
+
+
+def get_password_login(email: str) -> Optional[tuple[dict, Optional[str]]]:
+    """Return (public user dict, password hash) for an email, or None."""
+    with SessionLocal() as session:
+        user = session.scalar(
+            select(UserRecord).where(UserRecord.email == email.strip().lower())
+        )
+        if user is None:
+            return None
+        return _user_to_dict(user), user.password_hash
 
 
 def get_or_create_default_owner_id() -> int:
