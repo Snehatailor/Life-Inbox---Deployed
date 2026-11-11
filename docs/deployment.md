@@ -155,7 +155,7 @@ keep the files.
 
 ## What this milestone does **not** do
 
-- Real Google sign-in / OAuth consent
+- Real Google sign-in is available but stays off until OAuth credentials are set
 - Object storage (S3) wiring
-- Public internet deployment
+- Public internet deployment is documented for Render above; nothing deploys automatically
 - Purchases or paid managed services
