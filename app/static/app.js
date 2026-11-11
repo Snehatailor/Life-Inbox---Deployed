@@ -1431,6 +1431,7 @@ function applyAuthState() {
     : 'Not signed in';
   document.getElementById('signOutButton').hidden = !signedInAccount;
   document.getElementById('passwordForm').hidden = signedInAccount;
+  document.getElementById('googleLogin').hidden = signedInAccount || !authConfig.google_login;
   document.getElementById('devLoginForm').hidden = signedInAccount || !authConfig.allow_dev_login;
   document.getElementById('appContent').hidden = !canUseApp;
   document.getElementById('signedOutNotice').hidden = canUseApp;
@@ -1537,7 +1538,19 @@ async function logoutSession() {
   }
 }
 
+function showRedirectAuthError() {
+  // Google sign-in sends errors back as ?auth_error=...; show once, then tidy the URL.
+  const params = new URLSearchParams(window.location.search);
+  const message = params.get('auth_error');
+  if (!message) return;
+  setStatus('authStatus', message.slice(0, 200), true);
+  params.delete('auth_error');
+  const query = params.toString();
+  window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+}
+
 async function initApp() {
+  showRedirectAuthError();
   syncControlsFromUrl();
   await loadAuthConfig();
   const user = await loadAuthUser();

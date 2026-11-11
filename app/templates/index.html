@@ -29,6 +29,9 @@
         <button id="authSubmit" type="submit">Sign in</button>
         <button id="authModeToggle" type="button" class="secondary" onclick="toggleAuthMode()">Create an account</button>
       </form>
+      <div id="googleLogin" class="auth-social" hidden>
+        <a class="google-button" href="/api/auth/google/start">Continue with Google</a>
+      </div>
       <form id="devLoginForm" class="auth-form" onsubmit="devLogin(event)" hidden>
         <label>
           Dev login email (no password, local testing only)

@@ -95,13 +95,32 @@ Set `LIFE_INBOX_AUTH_MODE=password` with `LIFE_INBOX_ENV=beta` for a public
 deployment: anonymous visitors see only the sign-in form, and every account
 gets its own private inbox.
 
+## Sign in with Google
+
+Off until both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; then a
+**Continue with Google** button appears on the sign-in screen.
+
+1. In Google Cloud Console → APIs & Services → Credentials, create an
+   **OAuth client ID** of type **Web application**.
+2. Add the authorized redirect URI
+   `https://<your-service>.onrender.com/api/auth/google/callback`.
+3. On the OAuth consent screen, add the `openid`, `email` and `profile`
+   scopes. While the app is in "Testing", only listed test users can sign in;
+   publish it to let anyone with a Google account sign in.
+4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and (recommended)
+   `GOOGLE_REDIRECT_URI` to that same callback URL in the service's
+   environment. Never commit them.
+
+Only Google accounts with a verified email are accepted. Signing in with
+Google uses the existing account with that email, if there is one.
+
 ## Render (web service + Postgres)
 
 | Setting | Value |
 | --- | --- |
 | Runtime | Python, `PYTHON_VERSION=3.12.10` |
 | Build command | `pip install -r requirements.txt` |
-| Start command | `python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Start command | `python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"` |
 | Health check path | `/api/health` |
 
 Environment: `LIFE_INBOX_ENV=beta`, `LIFE_INBOX_AUTH_MODE=password`,

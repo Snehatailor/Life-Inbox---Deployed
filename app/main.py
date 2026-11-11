@@ -1,9 +1,16 @@
 import logging
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 
 from app.capture.image_extract import process_image_bytes, validate_image_upload
@@ -216,12 +223,14 @@ def auth_config():
     """What the sign-in UI should offer. Contains no user data."""
     from app.auth import PASSWORD_MIN_LENGTH
     from app.config import load_config
+    from app.google_auth import google_login_enabled
 
     config = load_config(strict=False)
     return {
         "environment": config.environment,
         "allow_dev_login": config.allow_dev_login,
         "password_login": True,
+        "google_login": google_login_enabled(),
         "password_min_length": PASSWORD_MIN_LENGTH,
         "anonymous_local_owner": config.environment == "local",
     }
@@ -261,15 +270,78 @@ def auth_logout(response: Response):
 
 
 @app.get("/api/auth/google/start")
-def auth_google_start():
-    """Stub only — real Google OAuth is not activated in this build."""
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            "Google sign-in stub only. Real OAuth consent is not enabled. "
-            "Use /api/auth/dev-login for private-beta local testing."
-        ),
+def auth_google_start(request: Request):
+    """Send the browser to Google's account chooser."""
+    from app import google_auth
+
+    if not google_auth.google_login_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Google sign-in is not configured (OAuth client ID and secret "
+                "are not set). Use email and password instead."
+            ),
+        )
+    state = google_auth.new_state()
+    callback_url = google_auth.redirect_uri(str(request.base_url))
+    response = RedirectResponse(
+        google_auth.authorization_url(state=state, callback_url=callback_url),
+        status_code=302,
     )
+    response.set_cookie(
+        key=google_auth.STATE_COOKIE,
+        value=state,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        max_age=google_auth.STATE_TTL_SECONDS,
+        path="/api/auth/google",
+    )
+    return response
+
+
+@app.get("/api/auth/google/callback")
+def auth_google_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Google sends the browser back here after the user picks an account."""
+    from app import google_auth
+    from app.auth import set_session_cookie
+
+    def fail(message: str) -> RedirectResponse:
+        response = RedirectResponse(
+            "/?" + urlencode({"auth_error": message}), status_code=302
+        )
+        response.delete_cookie(google_auth.STATE_COOKIE, path="/api/auth/google")
+        return response
+
+    if not google_auth.google_login_enabled():
+        return fail("Google sign-in is not configured.")
+    if error:
+        return fail("Google sign-in was cancelled.")
+    expected_state = request.cookies.get(google_auth.STATE_COOKIE)
+    if not google_auth.states_match(expected_state, state) or not code:
+        return fail("Google sign-in expired. Try again.")
+
+    try:
+        profile = google_auth.fetch_google_profile(
+            code=code,
+            callback_url=google_auth.redirect_uri(str(request.base_url)),
+        )
+        user = google_auth.find_or_create_google_user(profile)
+    except google_auth.GoogleLoginError as exc:
+        return fail(str(exc))
+    except Exception:
+        logger.exception("Google sign-in failed")
+        return fail("Google sign-in failed. Try again.")
+
+    response = RedirectResponse("/", status_code=302)
+    response.delete_cookie(google_auth.STATE_COOKIE, path="/api/auth/google")
+    set_session_cookie(response, user["id"])
+    return response
 
 
 def _process_url_item(item_id: int) -> dict:
