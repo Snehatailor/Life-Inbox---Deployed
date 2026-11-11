@@ -16,6 +16,20 @@ function setStatus(elementId, message, isError = false) {
   element.classList.toggle('error', isError);
 }
 
+// "Today, 3:42 PM", "Yesterday, 9:10 AM", or "12 Nov 2026" — readable at a glance.
+function friendlyDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const now = new Date();
+  const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  const time = date.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  if (dayDiff === 0) return `Today, ${time}`;
+  if (dayDiff === 1) return `Yesterday, ${time}`;
+  return date.toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'});
+}
+
 function setButtonBusy(buttonId, busy, busyLabel, idleLabel) {
   const button = document.getElementById(buttonId);
   button.disabled = busy;
@@ -243,7 +257,7 @@ async function addImage() {
     input.focus();
     return;
   }
-  setButtonBusy('addImageButton', true, 'Uploading…', 'Upload image');
+  setButtonBusy('addImageButton', true, 'Uploading…', 'Upload Image');
   setStatus('noteStatus', 'Saving image and running OCR…');
   const formData = new FormData();
   formData.append('file', file);
@@ -267,7 +281,7 @@ async function addImage() {
   } catch {
     setStatus('noteStatus', 'We could not upload that image.', true);
   } finally {
-    setButtonBusy('addImageButton', false, 'Uploading…', 'Upload image');
+    setButtonBusy('addImageButton', false, 'Uploading…', 'Upload Image');
   }
 }
 
@@ -288,7 +302,7 @@ async function addVoice() {
 }
 
 async function uploadVoiceFile(file, statusMessage) {
-  setButtonBusy('addVoiceButton', true, 'Uploading…', 'Upload audio');
+  setButtonBusy('addVoiceButton', true, 'Uploading…', 'Upload Audio');
   setStatus('noteStatus', statusMessage);
   const formData = new FormData();
   formData.append('file', file, file.name || 'voice-note.webm');
@@ -314,7 +328,7 @@ async function uploadVoiceFile(file, statusMessage) {
   } catch {
     setStatus('noteStatus', 'We could not upload that voice note.', true);
   } finally {
-    setButtonBusy('addVoiceButton', false, 'Uploading…', 'Upload audio');
+    setButtonBusy('addVoiceButton', false, 'Uploading…', 'Upload Audio');
   }
 }
 
@@ -376,7 +390,7 @@ async function addUrl() {
     input.focus();
     return;
   }
-  setButtonBusy('addUrlButton', true, 'Saving…', 'Save URL');
+  setButtonBusy('addUrlButton', true, 'Saving…', 'Save Link');
   setStatus('noteStatus', 'Saving URL and fetching article text…');
   try {
     const item = await fetchJson(
@@ -402,7 +416,7 @@ async function addUrl() {
   } catch {
     setStatus('noteStatus', 'We could not save that URL.', true);
   } finally {
-    setButtonBusy('addUrlButton', false, 'Saving…', 'Save URL');
+    setButtonBusy('addUrlButton', false, 'Saving…', 'Save Link');
   }
 }
 
@@ -484,7 +498,8 @@ function renderNote(note) {
   time.className = 'time';
   const status = note.processing_status ? ` · ${note.processing_status}` : '';
   const error = note.error_message ? ` · ${note.error_message}` : '';
-  time.textContent = `#${note.id} · ${note.item_type}${status}${error} · ${note.created_at}`;
+  time.textContent = `#${note.id} · ${note.item_type}${status}${error} · ${friendlyDate(note.created_at)}`;
+  time.title = note.created_at || '';
 
   const actions = document.createElement('div');
   actions.className = 'note-actions';
@@ -1426,15 +1441,19 @@ function applyAuthState() {
   // A real account (not the anonymous local owner) is signed in.
   const signedInAccount = Boolean(currentUser) && currentUser.auth_provider !== 'local';
   const canUseApp = Boolean(currentUser);
-  document.getElementById('authUser').textContent = currentUser
-    ? `Signed in as ${currentUser.display_name} <${currentUser.email}>`
-    : 'Not signed in';
+  const authUser = document.getElementById('authUser');
+  authUser.textContent = currentUser ? currentUser.display_name : 'Not signed in';
+  authUser.title = currentUser ? `Signed in as ${currentUser.email}` : '';
   document.getElementById('signOutButton').hidden = !signedInAccount;
   document.getElementById('passwordForm').hidden = signedInAccount;
   document.getElementById('googleLogin').hidden = signedInAccount || !authConfig.google_login;
   document.getElementById('devLoginForm').hidden = signedInAccount || !authConfig.allow_dev_login;
   document.getElementById('appContent').hidden = !canUseApp;
   document.getElementById('signedOutNotice').hidden = canUseApp;
+  // Signed-in accounts get the full app; the sign-in card steps aside.
+  document.getElementById('authCard').hidden = signedInAccount;
+  document.getElementById('sectionNav').hidden = !canUseApp;
+  document.body.classList.toggle('signed-out', !canUseApp);
 }
 
 async function loadAuthUser() {
@@ -1451,6 +1470,7 @@ function toggleAuthMode() {
   authMode = authMode === 'login' ? 'register' : 'login';
   const registering = authMode === 'register';
   document.getElementById('authSubmit').textContent = registering ? 'Create account' : 'Sign in';
+  document.getElementById('authTitle').textContent = registering ? 'Create your account' : 'Sign in';
   document.getElementById('authModeToggle').textContent = registering
     ? 'I already have an account'
     : 'Create an account';
@@ -1549,7 +1569,47 @@ function showRedirectAuthError() {
   window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
 }
 
+// Capture composer: Note / Link / PDF / Image / Voice segmented control.
+function selectCapturePane(name, focus = false) {
+  const tabs = document.querySelectorAll('.segmented .seg');
+  tabs.forEach(tab => {
+    const active = tab.dataset.pane === name;
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+    if (active && focus) tab.focus();
+  });
+  document.querySelectorAll('.composer .pane').forEach(pane => {
+    pane.hidden = pane.dataset.pane !== name;
+  });
+  const indicatorIndex = [...tabs].findIndex(tab => tab.dataset.pane === name);
+  const control = document.querySelector('.segmented');
+  if (control) control.style.setProperty('--seg-index', String(Math.max(indicatorIndex, 0)));
+}
+
+function setupCaptureTabs() {
+  const tabs = [...document.querySelectorAll('.segmented .seg')];
+  if (!tabs.length) return;
+  const control = document.querySelector('.segmented');
+  control.style.setProperty('--seg-count', String(tabs.length));
+  tabs.forEach((tab, index) => {
+    // Respond on press, not on release.
+    tab.addEventListener('pointerdown', event => {
+      if (event.button === 0) selectCapturePane(tab.dataset.pane);
+    });
+    tab.addEventListener('click', () => selectCapturePane(tab.dataset.pane));
+    tab.addEventListener('keydown', event => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = tabs[(index + step + tabs.length) % tabs.length];
+      selectCapturePane(next.dataset.pane, true);
+    });
+  });
+  selectCapturePane('note');
+}
+
 async function initApp() {
+  setupCaptureTabs();
   showRedirectAuthError();
   syncControlsFromUrl();
   await loadAuthConfig();
