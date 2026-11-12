@@ -1503,6 +1503,34 @@ const weeklyTypeLabels = {
   text: 'notes', url: 'links', pdf: 'PDFs', image: 'images', voice: 'voice notes'
 };
 
+// Weekly stats card: goal-day dots, tasks by priority, best day, streak, habits.
+function weeklyStatsHtml(stats) {
+  if (!stats) return '';
+  const dots = stats.week_days.map(day => {
+    const label = `${day.weekday} ${day.day}: ${day.points} points${day.goal_met ? ' · goal met' : ''}`;
+    return `<span class="week-dot${day.goal_met ? ' met' : ''}${day.points && !day.goal_met ? ' some' : ''}" title="${esc(label)}" aria-label="${esc(label)}"><span>${esc(day.weekday.slice(0, 1))}</span></span>`;
+  }).join('');
+  const byPriority = stats.done_by_priority;
+  const best = stats.best_day
+    ? `${esc(stats.best_day.weekday)} · ${stats.best_day.points} pts`
+    : 'No points yet';
+  return [
+    '<div class="week-stats" aria-label="Weekly stats">',
+    '<div class="week-stats-goal">',
+    `<div class="week-dots">${dots}</div>`,
+    `<p class="week-stats-big">${stats.goal_days}<span>/7</span></p>`,
+    `<p class="muted">days with ${stats.goal} points</p>`,
+    '</div>',
+    '<dl class="week-stats-list">',
+    `<div><dt>Done</dt><dd><span class="prio-count high">${byPriority.High} High</span> <span class="prio-count medium">${byPriority.Medium} Medium</span> <span class="prio-count low">${byPriority.Low} Low</span></dd></div>`,
+    `<div><dt>Best day</dt><dd>${best}</dd></div>`,
+    `<div><dt>Streak</dt><dd>${stats.streak ? `🔥 ${stats.streak} day${stats.streak === 1 ? '' : 's'}` : 'Not started'}</dd></div>`,
+    `<div><dt>Habits kept</dt><dd>↻ ${stats.habits_kept}</dd></div>`,
+    '</dl>',
+    '</div>'
+  ].join('');
+}
+
 function renderWeeklyReview(review) {
   const root = document.getElementById('weeklyReview');
   const byType = Object.entries(review.captured.by_type)
@@ -1518,6 +1546,7 @@ function renderWeeklyReview(review) {
   root.innerHTML = [
     `<p class="week-summary">${esc(review.summary)}</p>`,
     `<p class="muted week-summary-kind">${summaryLabel}</p>`,
+    weeklyStatsHtml(review.stats),
     '<div class="week-grid">',
     `<div class="week-card"><h3>📥 Captured</h3><p class="week-number">${review.captured.total}</p>`,
     `<p class="muted">${byType || 'Nothing new this week.'}</p></div>`,

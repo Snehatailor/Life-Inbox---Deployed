@@ -49,6 +49,14 @@ def rule_based_summary(facts: dict) -> str:
     done = len(facts["completed_tasks"])
     parts.append(f"You completed {_plural(done, 'task', 'tasks')}.")
 
+    stats = facts.get("stats") or {}
+    if stats.get("goal_days"):
+        parts.append(
+            f"You hit your daily goal on {stats['goal_days']} of the last 7 days."
+        )
+    if stats.get("habits_kept"):
+        parts.append(f"You kept {_plural(stats['habits_kept'], 'habit', 'habits')} going.")
+
     if facts["top_topics"]:
         top = facts["top_topics"][0]
         parts.append(f"Most of it was about {top['name']}.")
@@ -69,6 +77,9 @@ def _model_summary(facts: dict) -> Optional[str]:
         "open_task_count": facts["open_task_count"],
         "top_topics": facts["top_topics"],
         "untouched_count": facts["untouched_count"],
+        "goal_days_of_7": (facts.get("stats") or {}).get("goal_days"),
+        "streak_days": (facts.get("stats") or {}).get("streak"),
+        "habits_kept": (facts.get("stats") or {}).get("habits_kept"),
     }
     prompt = (
         "Write a friendly two-sentence weekly review for a personal inbox app. "
