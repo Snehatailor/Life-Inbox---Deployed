@@ -66,9 +66,17 @@ class InboxItem(BaseModel):
     storage_path: Optional[str] = None
     extracted_text: Optional[str] = None
     ai_description: Optional[str] = None
+    file_format: str = "other"
+    domain: str = "Unsorted"
+    domain_confidence: str = "none"
+    domain_source: str = "auto"
     owner_user_id: Optional[int] = None
     created_at: str
     updated_at: Optional[str]
+
+
+class DomainUpdate(BaseModel):
+    domain: Optional[str] = Field(default=None, max_length=40)
 
 
 class UrlItemCreate(BaseModel):
@@ -180,13 +188,42 @@ class PersistedAnalysis(AnalysisResult):
 
 
 TaskStatus = Literal["open", "completed", "dismissed"]
-TaskListStatus = Literal["open", "completed", "dismissed", "all"]
+TaskListStatus = Literal["open", "completed", "dismissed", "backlog", "all"]
+
+
+class RadarReason(BaseModel):
+    points: int
+    text: str
+
+
+class TaskRadar(BaseModel):
+    score: int
+    level: Literal["on_track", "watch", "at_risk"]
+    reasons: List[RadarReason]
+    rescue_score: int
 
 
 class Task(BaseModel):
     id: int
     text: str
     priority: Priority
+    base_priority: Optional[str] = None
+    priority_raised: bool = False
+    priority_source: Optional[str] = None
+    days_left: Optional[int] = None
+    days_left_label: Optional[str] = None
+    urgency: str = "none"
+    suggested_due_on: Optional[str] = None
+    points_value: int = 10
+    domain: str = "Unsorted"
+    domain_source: str = "auto"
+    google_event_url: Optional[str] = None
+    completed_at: Optional[str] = None
+    points_awarded: Optional[int] = None
+    binned_at: Optional[str] = None
+    slot_start: Optional[str] = None
+    slot_end: Optional[str] = None
+    slot_set_at: Optional[str] = None
     timing_text: Optional[str]
     ai_timing_text: Optional[str] = None
     timing_confirmed: bool = False
@@ -198,6 +235,58 @@ class Task(BaseModel):
     source_item_ids: List[int]
     created_at: str
     updated_at: str
+    # Procrastination Radar, on open tasks in list responses.
+    radar: Optional[TaskRadar] = None
+    # Extra coins paid on this completion for rescuing an at-risk task.
+    rescue_bonus: int = 0
+
+
+class TaskPatch(BaseModel):
+    priority: Optional[Priority] = None
+    due_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    text: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    domain: Optional[str] = Field(default=None, max_length=40)
+
+
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=40)
+    share: bool = False
+
+
+class TeamJoin(BaseModel):
+    code: str = Field(min_length=4, max_length=20)
+    share: bool = False
+
+
+class TeamSharing(BaseModel):
+    share: bool
+
+
+class SlotRequest(BaseModel):
+    start: str = Field(min_length=10, max_length=40)
+    end: str = Field(min_length=10, max_length=40)
+
+
+class RemindLater(BaseModel):
+    minutes: int = Field(default=5, ge=1, le=240)
+
+
+class ShopBuy(BaseModel):
+    item_id: str = Field(min_length=1, max_length=40)
+
+
+class PetSelect(BaseModel):
+    pet_id: str = Field(min_length=1, max_length=40)
+
+
+class PetSettingsPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=24)
+    in_page: Optional[bool] = None
+
+
+class QuickTaskRequest(BaseModel):
+    sentence: str = Field(min_length=2, max_length=500)
+    tz: Optional[str] = Field(default=None, max_length=64)  # the person's IANA time zone
 
 
 class TaskTimingConfirm(BaseModel):

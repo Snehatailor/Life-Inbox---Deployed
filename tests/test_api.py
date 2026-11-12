@@ -68,7 +68,7 @@ def test_home_page_loads(client):
 @pytest.mark.parametrize(
     ("path", "content_type", "expected_content"),
     [
-        ("/static/styles.css", "text/css", ".wrap"),
+        ("/static/styles.css", "text/css", ".app-shell"),
         ("/static/app.js", "javascript", "async function addNote()"),
     ],
 )
@@ -111,6 +111,10 @@ def test_create_and_list_canonical_text_item(client):
         "storage_path": None,
         "extracted_text": None,
         "ai_description": None,
+        "file_format": "note",
+        "domain": "Unsorted",
+        "domain_confidence": "none",
+        "domain_source": "auto",
         "owner_user_id": item["owner_user_id"],
         "created_at": item["created_at"],
         "updated_at": None,
@@ -1983,6 +1987,58 @@ def test_parse_timing_preserves_original_phrase():
     assert parsed.original_phrase == "this weekend maybe"
     assert parsed.due_date is not None
     assert parsed.needs_confirmation is True
+
+
+def test_fallback_organizer_splits_dated_actions_and_keeps_calendar_dates():
+    """A single capture can create several independently scheduled tasks."""
+    from datetime import date
+
+    from app.attention.dates import parse_timing_phrase
+    from app.organizer import fallback_analyze
+
+    result = fallback_analyze(
+        [
+            {
+                "id": 1,
+                "text": (
+                    "Buy vegetables tomorrow; call Mom after 5 days; "
+                    "submit report on Oct 18; book dentist next Monday."
+                ),
+            }
+        ]
+    )
+
+    todos = result["todos"]
+    assert len(todos) == 4
+    assert [todo["when"] for todo in todos] == [
+        "tomorrow",
+        "after 5 days",
+        "Oct 18",
+        "next Monday",
+    ]
+    assert [
+        parse_timing_phrase(todo["when"], reference=date(2026, 10, 17)).normalized_iso
+        for todo in todos
+    ] == ["2026-10-18", "2026-10-22", "2026-10-18", "2026-10-26"]
+
+
+def test_calendar_includes_dated_inbox_items_before_full_analysis(client):
+    from app.attention.dates import parse_timing_phrase
+
+    item = client.post(
+        "/api/items",
+        json={"raw_text": "Renew passport on October 18"},
+    ).json()
+
+    scheduled = client.get("/api/calendar/tasks")
+
+    assert scheduled.status_code == 200
+    assert {
+        "id": f"item-{item['id']}",
+        "source": "inbox",
+        "due_on": parse_timing_phrase("October 18").normalized_iso,
+        "timing_text": "October 18",
+    }.items() <= scheduled.json()[0].items()
 
 
 def test_user_isolation_prevents_cross_account_access(client):

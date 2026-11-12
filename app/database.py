@@ -3,7 +3,7 @@ import json
 import os
 import re
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,13 +19,37 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    delete,
     event,
+    func,
     or_,
     select,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from app.attention.dates import today_in_configured_tz
+from app.game.gcal import google_event_url
+from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
+from app.game.progress import build_game_summary
+from app.game.radar import HISTORY_DAYS, assess as assess_risk, lateness_by_domain, rescue_bonus
+from app.game.reminders import build_reminders, parse_utc, validate_slot
+from app.game.shop import PETS, STARTER_PET, pet_by_id, spendable_balance
+from app.game.teams import (
+    build_leaderboard,
+    new_invite_code,
+    normalize_code,
+    week_start,
+)
+from app.game.scoring import (
+    effective_priority,
+    points_for,
+    PRIORITY_POINTS,
+    days_left,
+    days_left_label,
+    default_due_offset,
+    urgency,
+)
 from app.capture.pipeline import (
     ANALYZABLE_STATUSES,
     ANALYZABLE_TYPES,
@@ -112,6 +136,8 @@ class InboxItemRecord(Base):
     storage_path = Column(Text, nullable=True)
     extracted_text = Column(Text, nullable=True)
     ai_description = Column(Text, nullable=True)
+    domain = Column(Text, nullable=True)
+    domain_source = Column(Text, nullable=True)
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=True)
@@ -230,8 +256,105 @@ class TaskRecord(Base):
     status = Column(Text, nullable=False)
     dedup_key = Column(Text, nullable=False)
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    completed_at = Column(Text, nullable=True)
+    points_awarded = Column(Integer, nullable=True)
+    binned_at = Column(Text, nullable=True)
+    domain = Column(Text, nullable=True)
+    domain_source = Column(Text, nullable=True)
+    priority_source = Column(Text, nullable=True)
+    slot_start = Column(Text, nullable=True)
+    slot_end = Column(Text, nullable=True)
+    slot_set_at = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
+
+
+class ShopPurchaseRecord(Base):
+    __tablename__ = "shop_purchases"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "item_id", name="uq_shop_owner_item"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    item_id = Column(Text, nullable=False)
+    price = Column(Integer, nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class PetSettingsRecord(Base):
+    __tablename__ = "pet_settings"
+
+    owner_user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    active_pet = Column(Text, nullable=False, default="cat")
+    pet_name = Column(Text, nullable=True)
+    in_page = Column(Integer, nullable=False, default=0)
+
+
+class PointEventRecord(Base):
+    __tablename__ = "point_events"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    points = Column(Integer, nullable=False)
+    day = Column(Text, nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class TaskEventRecord(Base):
+    """One snooze, remind-later, reopen or completion. The radar counts these."""
+
+    __tablename__ = "task_events"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    kind = Column(Text, nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class BusyBlockRecord(Base):
+    __tablename__ = "busy_blocks"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    starts_at = Column(Text, nullable=False)
+    ends_at = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    created_at = Column(Text, nullable=False)
+
+
+class TeamRecord(Base):
+    __tablename__ = "teams"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False)
+    invite_code = Column(Text, nullable=False, unique=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(Text, nullable=False)
+
+
+class TeamMemberRecord(Base):
+    __tablename__ = "team_members"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    share_points = Column(Integer, nullable=False, default=0)
+    joined_at = Column(Text, nullable=False)
 
 
 class CalendarActionReceiptRecord(Base):
@@ -445,7 +568,24 @@ def init_db():
 
 
 def _item_to_dict(item: InboxItemRecord) -> dict:
+    if item.domain and item.domain_source == "user":
+        domain, domain_confidence, domain_source = item.domain, "user", "user"
+    else:
+        domain, domain_confidence = detect_domain(
+            item.title,
+            item.original_filename,
+            item.source_url,
+            item.raw_text,
+            item.extracted_text,
+        )
+        domain_source = "auto"
     return {
+        "file_format": detect_format(
+            item.item_type, item.original_filename, item.mime_type
+        ),
+        "domain": domain,
+        "domain_confidence": domain_confidence,
+        "domain_source": domain_source,
         "id": item.id,
         "item_type": item.item_type,
         "title": item.title,
@@ -1033,17 +1173,72 @@ def _ensure_task_due_fields(task: TaskRecord) -> None:
     task.due_confidence = parsed.confidence
 
 
+def _task_domain(session, task: TaskRecord, source_item_ids) -> tuple[str, str]:
+    """A person's domain choice, otherwise one detected from the task and its notes."""
+    if task.domain and task.domain_source == "user":
+        return task.domain, "user"
+    source_texts = [
+        " ".join(filter(None, (i.title, i.raw_text)))
+        for i in (
+            session.get(InboxItemRecord, item_id)
+            for item_id in source_item_ids[:3]
+        )
+        if i is not None
+    ]
+    domain, _ = detect_domain(task.text, *source_texts)
+    return domain, "auto"
+
+
+def _task_source_ids(session, task_id: int) -> list[int]:
+    return list(
+        session.scalars(
+            select(TaskSourceItemRecord.item_id)
+            .where(TaskSourceItemRecord.task_id == task_id)
+            .order_by(TaskSourceItemRecord.item_id.asc())
+        ).all()
+    )
+
+
 def _task_to_dict(session, task: TaskRecord) -> dict:
     _ensure_task_due_fields(task)
-    source_item_ids = session.scalars(
-        select(TaskSourceItemRecord.item_id)
-        .where(TaskSourceItemRecord.task_id == task.id)
-        .order_by(TaskSourceItemRecord.item_id.asc())
-    ).all()
+    source_item_ids = _task_source_ids(session, task.id)
+    today = today_in_configured_tz()
+    domain, domain_source = _task_domain(session, task, source_item_ids)
+    priority = effective_priority(
+        task.priority, task.priority_source, task.due_on, today, task.status
+    )
+    suggested_due_on = None
+    if not task.due_on:
+        suggested_due_on = (
+            today + timedelta(days=default_due_offset(task.priority))
+        ).isoformat()
     return {
         "id": task.id,
         "text": task.text,
-        "priority": task.priority,
+        "priority": priority,
+        "base_priority": task.priority,
+        "priority_raised": priority != task.priority,
+        "priority_source": task.priority_source,
+        "days_left": days_left(task.due_on, today),
+        "days_left_label": days_left_label(task.due_on, today),
+        "urgency": urgency(task.due_on, today),
+        "suggested_due_on": suggested_due_on,
+        "points_value": PRIORITY_POINTS.get(priority, 10),
+        "domain": domain,
+        "domain_source": domain_source,
+        "google_event_url": (
+            google_event_url(
+                f"[{priority}] {task.text}", task.due_on, "From Life Inbox"
+            )
+            if task.due_on
+            else None
+        ),
+        "completed_at": task.completed_at,
+        "points_awarded": task.points_awarded,
+        "binned_at": task.binned_at,
+        "slot_start": task.slot_start,
+        "slot_end": task.slot_end,
+        "slot_set_at": task.slot_set_at,
         "timing_text": task.timing_text,
         "ai_timing_text": task.ai_timing_text,
         "timing_confirmed": bool(task.timing_confirmed),
@@ -1058,8 +1253,10 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
     }
 
 
-def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
-    if status_filter not in TASK_STATUSES | {"all"}:
+def list_tasks_from_db(
+    status_filter: str = TASK_OPEN, search: Optional[str] = None
+) -> list[dict]:
+    if status_filter not in TASK_STATUSES | {"all", "backlog"}:
         raise ValueError("Unsupported task status")
 
     owner_id = require_owner_id()
@@ -1069,10 +1266,117 @@ def list_tasks_from_db(status_filter: str = TASK_OPEN) -> list[dict]:
             .where(TaskRecord.owner_user_id == owner_id)
             .order_by(TaskRecord.id.asc())
         )
-        if status_filter != "all":
-            statement = statement.where(TaskRecord.status == status_filter)
+        if status_filter == "backlog":
+            statement = statement.where(TaskRecord.binned_at.is_not(None))
+        elif status_filter != "all":
+            statement = statement.where(
+                TaskRecord.status == status_filter,
+                TaskRecord.binned_at.is_(None),
+            )
+        if (search or "").strip():
+            statement = statement.where(
+                TaskRecord.text.icontains(search.strip(), autoescape=True)
+            )
         tasks = session.scalars(statement).all()
-        return [_task_to_dict(session, task) for task in tasks]
+        results = [_task_to_dict(session, task) for task in tasks]
+        open_results = [t for t in results if _radar_applies(t)]
+        if open_results:
+            pool = (
+                open_results
+                if status_filter == TASK_OPEN and not (search or "").strip()
+                else _open_task_dicts(session, owner_id)
+            )
+            _attach_radar(session, owner_id, open_results, pool)
+        return results
+
+
+SNOOZE_EVENT_KINDS = ("snoozed", "remind_later")
+
+
+def _radar_applies(task: dict) -> bool:
+    return task["status"] == TASK_OPEN and not task["binned_at"]
+
+
+def _open_task_dicts(session, owner_id: int) -> list[dict]:
+    return [
+        _task_to_dict(session, task)
+        for task in session.scalars(
+            select(TaskRecord).where(
+                TaskRecord.owner_user_id == owner_id,
+                TaskRecord.status == TASK_OPEN,
+                TaskRecord.binned_at.is_(None),
+            )
+        ).all()
+    ]
+
+
+def _record_task_event(session, task: TaskRecord, kind: str, now_iso: str) -> None:
+    session.add(
+        TaskEventRecord(
+            owner_user_id=task.owner_user_id,
+            task_id=task.id,
+            kind=kind,
+            created_at=now_iso,
+        )
+    )
+
+
+def _domain_lateness(session, owner_id: int, today) -> dict[str, float]:
+    """How late this person finishes tasks in each domain (last 30 days)."""
+    from app.attention.dates import configured_timezone
+
+    since = (today - timedelta(days=HISTORY_DAYS + 1)).isoformat()
+    finished = session.scalars(
+        select(TaskRecord).where(
+            TaskRecord.owner_user_id == owner_id,
+            TaskRecord.status == "completed",
+            TaskRecord.completed_at.is_not(None),
+            TaskRecord.completed_at >= since,
+            TaskRecord.due_on.is_not(None),
+        )
+    ).all()
+    tz = configured_timezone()
+    rows = []
+    for task in finished:
+        completed = parse_utc(task.completed_at)
+        if completed is None:
+            continue
+        domain, _ = _task_domain(session, task, _task_source_ids(session, task.id))
+        rows.append((domain, task.due_on, completed.astimezone(tz).date()))
+    return lateness_by_domain(rows, today)
+
+
+def _snooze_counts(session, owner_id: int, task_ids: list[int]) -> dict[int, int]:
+    if not task_ids:
+        return {}
+    return dict(
+        session.execute(
+            select(TaskEventRecord.task_id, func.count())
+            .where(
+                TaskEventRecord.owner_user_id == owner_id,
+                TaskEventRecord.task_id.in_(task_ids),
+                TaskEventRecord.kind.in_(SNOOZE_EVENT_KINDS),
+            )
+            .group_by(TaskEventRecord.task_id)
+        ).all()
+    )
+
+
+def _attach_radar(session, owner_id: int, targets: list[dict], pool: list[dict]) -> None:
+    """Add a `radar` score to each open task. History is loaded once per call."""
+    today = today_in_configured_tz()
+    now = datetime.now(timezone.utc)
+    lateness = _domain_lateness(session, owner_id, today)
+    snoozes = _snooze_counts(session, owner_id, [t["id"] for t in targets])
+    for task in targets:
+        task["radar"] = assess_risk(
+            task,
+            snoozes=snoozes.get(task["id"], 0),
+            domain_lateness=lateness,
+            open_tasks=pool,
+            today=today,
+            now=now,
+        )
 
 
 def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
@@ -1084,11 +1388,694 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         task = _owned_task(session, task_id, owner_id)
         if task is None:
             return None
+        bonus = 0
         if task.status != task_status:
+            now = datetime.now(timezone.utc)
+            today = today_in_configured_tz()
+            if task_status == "completed" and task.points_awarded is None:
+                points = points_for(
+                    effective_priority(
+                        task.priority, task.priority_source, task.due_on, today
+                    ),
+                    task.due_on,
+                    today,
+                )
+                if task.status == TASK_OPEN and not task.binned_at:
+                    before = _task_to_dict(session, task)
+                    _attach_radar(
+                        session, owner_id, [before], _open_task_dicts(session, owner_id)
+                    )
+                    bonus = rescue_bonus(before["radar"]["rescue_score"])
+                    points += bonus
+                _record_task_event(session, task, "completed", now.isoformat())
+                task.points_awarded = points
+                task.completed_at = now.isoformat()
+                session.add(
+                    PointEventRecord(
+                        owner_user_id=owner_id,
+                        task_id=task.id,
+                        points=points,
+                        day=today.isoformat(),
+                        created_at=now.isoformat(),
+                    )
+                )
+            elif task.status == "completed" and task_status != "completed":
+                # Reopening or dismissing takes the points back, so
+                # complete -> reopen -> complete cannot farm points.
+                session.execute(
+                    delete(PointEventRecord).where(
+                        PointEventRecord.task_id == task.id
+                    )
+                )
+                task.points_awarded = None
+                task.completed_at = None
+                _record_task_event(
+                    session,
+                    task,
+                    "reopened" if task_status == TASK_OPEN else "dismissed",
+                    now.isoformat(),
+                )
             task.status = task_status
-            task.updated_at = datetime.now(timezone.utc).isoformat()
+            task.updated_at = now.isoformat()
             session.commit()
+        result = _task_to_dict(session, task)
+        if _radar_applies(result):
+            _attach_radar(session, owner_id, [result], _open_task_dicts(session, owner_id))
+        result["rescue_bonus"] = bonus
+        return result
+
+
+def set_item_domain(item_id: int, domain: Optional[str]) -> Optional[dict]:
+    """Save a person's domain choice; None/Unsorted clears it back to auto."""
+    if domain is not None and domain not in DOMAINS + [UNSORTED]:
+        raise ValueError("Unknown domain")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        item = _owned_item(session, item_id, owner_id)
+        if item is None:
+            return None
+        if domain in (None, UNSORTED):
+            item.domain, item.domain_source = None, None
+        else:
+            item.domain, item.domain_source = domain, "user"
+        item.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _item_to_dict(item)
+
+
+def add_text_file_item_to_db(
+    filename: str, mime_type: str, text: str
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        item = InboxItemRecord(
+            item_type=TEXT_ITEM_TYPE,
+            title=filename,
+            raw_text=text,
+            original_filename=filename,
+            mime_type=mime_type,
+            processing_status=READY_STATUS,
+            owner_user_id=require_owner_id(),
+            created_at=now,
+        )
+        session.add(item)
+        session.commit()
+        return _item_to_dict(item)
+
+
+def create_quick_task(
+    text: str,
+    priority: str,
+    due_on: Optional[str],
+    due_confidence: Optional[str],
+    priority_chosen: bool = False,
+    slot: Optional[tuple] = None,
+) -> dict:
+    """Create a task directly from a spoken or typed sentence (no source note)."""
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    dedup_key = hashlib.sha256(
+        f"quick:{owner_id}:{text}:{now}".encode("utf-8")
+    ).hexdigest()
+    with SessionLocal() as session:
+        task = TaskRecord(
+            text=text,
+            priority=priority,
+            priority_source="user" if priority_chosen else None,
+            slot_start=slot[0].astimezone(timezone.utc).isoformat() if slot else None,
+            slot_end=slot[1].astimezone(timezone.utc).isoformat() if slot else None,
+            slot_set_at=now if slot else None,
+            timing_text=due_on,
+            timing_confirmed=1 if due_on else 0,
+            due_on=due_on,
+            due_confidence=due_confidence or ("high" if due_on else None),
+            status=TASK_OPEN,
+            dedup_key=dedup_key,
+            owner_user_id=owner_id,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(task)
+        session.commit()
         return _task_to_dict(session, task)
+
+
+def update_task_fields(
+    task_id: int,
+    priority: Optional[str] = None,
+    due_on: Optional[str] = None,
+    text: Optional[str] = None,
+    domain: Optional[str] = None,
+    set_domain: bool = False,
+) -> Optional[dict]:
+    """Edit an open task: wording, priority, deadline or section.
+
+    `domain=None` with `set_domain=True` clears a person's choice back to auto.
+    """
+    if priority is not None and priority not in PRIORITY_POINTS:
+        raise ValueError("Unknown priority")
+    if due_on is not None:
+        from datetime import date as _date
+
+        _date.fromisoformat(due_on)
+    if text is not None and not text.strip():
+        raise ValueError("A task needs some words")
+    if set_domain and domain not in (None, UNSORTED) and domain not in DOMAINS:
+        raise ValueError("Unknown domain")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be changed")
+        if priority is not None:
+            task.priority = priority
+            task.priority_source = "user"
+        if text is not None:
+            task.text = " ".join(text.split())
+        if due_on is not None:
+            task.due_on = due_on
+            task.timing_text = due_on
+            task.timing_confirmed = 1
+            task.due_confidence = "high"
+        if set_domain:
+            if domain in (None, UNSORTED):
+                task.domain, task.domain_source = None, None
+            else:
+                task.domain, task.domain_source = domain, "user"
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def replace_busy_blocks(blocks: list[dict]) -> int:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        session.execute(
+            delete(BusyBlockRecord).where(BusyBlockRecord.owner_user_id == owner_id)
+        )
+        for block in blocks:
+            session.add(
+                BusyBlockRecord(
+                    owner_user_id=owner_id,
+                    starts_at=block["starts_at"],
+                    ends_at=block["ends_at"],
+                    summary=block.get("summary"),
+                    created_at=now,
+                )
+            )
+        session.commit()
+    return len(blocks)
+
+
+def list_busy_blocks() -> list[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(BusyBlockRecord)
+            .where(BusyBlockRecord.owner_user_id == owner_id)
+            .order_by(BusyBlockRecord.starts_at.asc())
+        ).all()
+        return [
+            {"starts_at": r.starts_at, "ends_at": r.ends_at, "summary": r.summary}
+            for r in rows
+        ]
+
+
+def get_task_for_slots(task_id: int) -> Optional[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        return None if task is None else _task_to_dict(session, task)
+
+
+def _membership(session, owner_id: int) -> Optional["TeamMemberRecord"]:
+    return session.scalar(
+        select(TeamMemberRecord).where(TeamMemberRecord.user_id == owner_id)
+    )
+
+
+def create_team(name: str, share: bool) -> dict:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        if _membership(session, owner_id) is not None:
+            raise ValueError("You are already in a team. Leave it first.")
+        team = TeamRecord(
+            name=name.strip(),
+            invite_code=new_invite_code(),
+            created_by=owner_id,
+            created_at=now,
+        )
+        session.add(team)
+        session.flush()
+        session.add(
+            TeamMemberRecord(
+                team_id=team.id,
+                user_id=owner_id,
+                share_points=1 if share else 0,
+                joined_at=now,
+            )
+        )
+        session.commit()
+    return team_summary_from_db()
+
+
+def join_team(code: str, share: bool) -> dict:
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc).isoformat()
+    with SessionLocal() as session:
+        if _membership(session, owner_id) is not None:
+            raise ValueError("You are already in a team. Leave it first.")
+        team = session.scalar(
+            select(TeamRecord).where(TeamRecord.invite_code == normalize_code(code))
+        )
+        if team is None:
+            raise LookupError("No team has that invite code.")
+        session.add(
+            TeamMemberRecord(
+                team_id=team.id,
+                user_id=owner_id,
+                share_points=1 if share else 0,
+                joined_at=now,
+            )
+        )
+        session.commit()
+    return team_summary_from_db()
+
+
+def set_team_sharing(share: bool) -> Optional[dict]:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        member = _membership(session, owner_id)
+        if member is None:
+            return None
+        member.share_points = 1 if share else 0
+        session.commit()
+    return team_summary_from_db()
+
+
+def leave_team() -> bool:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        member = _membership(session, owner_id)
+        if member is None:
+            return False
+        team_id = member.team_id
+        session.delete(member)
+        session.flush()
+        remaining = session.scalar(
+            select(func.count(TeamMemberRecord.id)).where(
+                TeamMemberRecord.team_id == team_id
+            )
+        )
+        if not remaining:
+            session.execute(delete(TeamRecord).where(TeamRecord.id == team_id))
+        session.commit()
+    return True
+
+
+def team_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    today = today_in_configured_tz()
+    with SessionLocal() as session:
+        mine = _membership(session, owner_id)
+        if mine is None:
+            return {"team": None}
+        team = session.get(TeamRecord, mine.team_id)
+        rows = session.execute(
+            select(TeamMemberRecord, UserRecord)
+            .join(UserRecord, UserRecord.id == TeamMemberRecord.user_id)
+            .where(TeamMemberRecord.team_id == team.id)
+        ).all()
+        member_ids = [m.user_id for m, _ in rows]
+        events = session.execute(
+            select(
+                PointEventRecord.owner_user_id,
+                PointEventRecord.day,
+                func.sum(PointEventRecord.points),
+                func.count(PointEventRecord.id),
+            )
+            .where(PointEventRecord.owner_user_id.in_(member_ids))
+            .group_by(PointEventRecord.owner_user_id, PointEventRecord.day)
+        ).all()
+        start = week_start(today).isoformat()
+        by_user: dict[int, dict] = {uid: {} for uid in member_ids}
+        tasks_week: dict[int, int] = {uid: 0 for uid in member_ids}
+        for uid, day, points, count in events:
+            by_user[uid][day] = int(points)
+            if day >= start:
+                tasks_week[uid] += int(count)
+        board = build_leaderboard(
+            [
+                {
+                    "user_id": m.user_id,
+                    "display_name": u.display_name,
+                    "share": bool(m.share_points),
+                    "by_day": by_user[m.user_id],
+                    "tasks_week": tasks_week[m.user_id],
+                }
+                for m, u in rows
+            ],
+            today,
+        )
+        for row in board["rows"]:
+            row["is_me"] = row.pop("user_id") == owner_id
+        return {
+            "team": {
+                "id": team.id,
+                "name": team.name,
+                "invite_code": team.invite_code,
+                "member_count": len(rows),
+                "i_share": bool(mine.share_points),
+                "week_start": board["week_start"],
+                "rows": board["rows"],
+                "private_count": board["private_count"],
+            }
+        }
+
+
+def set_task_slot(task_id: int, start: Optional[str], end: Optional[str]) -> Optional[dict]:
+    """Save (or clear, with None) the time slot a person scheduled for a task."""
+    if start is not None:
+        start_dt, end_dt = parse_utc(start), parse_utc(end)
+        if start_dt is None or end_dt is None:
+            raise ValueError("Slot times must be ISO date-times with a time zone")
+        validate_slot(start_dt, end_dt)
+        start = start_dt.astimezone(timezone.utc).isoformat()
+        end = end_dt.astimezone(timezone.utc).isoformat()
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be scheduled")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        task.slot_start, task.slot_end = start, end
+        task.slot_set_at = now_iso if start else None
+        task.updated_at = now_iso
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def postpone_task_slot(task_id: int, minutes: int) -> Optional[dict]:
+    """Move a task's reminder to `minutes` from now, keeping its length ("snooze 5 min")."""
+    from app.game.reminders import DEFAULT_SLOT_MINUTES
+
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be reminded about")
+        old_start, old_end = parse_utc(task.slot_start), parse_utc(task.slot_end)
+        length = (
+            old_end - old_start
+            if old_start and old_end and old_end > old_start
+            else timedelta(minutes=DEFAULT_SLOT_MINUTES)
+        )
+        start = now + timedelta(minutes=minutes)
+        task.slot_start = start.isoformat()
+        task.slot_end = (start + length).isoformat()
+        task.slot_set_at = now.isoformat()
+        task.updated_at = now.isoformat()
+        _record_task_event(session, task, "remind_later", now.isoformat())
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def _pet_settings(session, owner_id: int) -> "PetSettingsRecord":
+    settings = session.get(PetSettingsRecord, owner_id)
+    if settings is None:
+        settings = PetSettingsRecord(
+            owner_user_id=owner_id, active_pet=STARTER_PET, in_page=0
+        )
+        session.add(settings)
+        session.flush()
+    return settings
+
+
+def _wallet(session, owner_id: int) -> tuple[int, int, set]:
+    earned = int(
+        session.scalar(
+            select(func.coalesce(func.sum(PointEventRecord.points), 0)).where(
+                PointEventRecord.owner_user_id == owner_id
+            )
+        )
+        or 0
+    )
+    rows = session.execute(
+        select(ShopPurchaseRecord.item_id, ShopPurchaseRecord.price).where(
+            ShopPurchaseRecord.owner_user_id == owner_id
+        )
+    ).all()
+    owned = {item_id for item_id, _ in rows} | {STARTER_PET}
+    return earned, sum(price for _, price in rows), owned
+
+
+def shop_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        earned, spent, owned = _wallet(session, owner_id)
+        session.commit()
+        balance = spendable_balance(earned, spent)
+        items = [
+            {
+                **pet,
+                "owned": pet["id"] in owned,
+                "active": pet["id"] == settings.active_pet,
+                "affordable": pet["id"] in owned or pet["price"] <= balance,
+            }
+            for pet in PETS
+        ]
+        return {
+            "balance": balance,
+            "earned": earned,
+            "spent": spent,
+            "active_pet": settings.active_pet,
+            "items": items,
+        }
+
+
+def buy_pet(pet_id: str) -> dict:
+    pet = pet_by_id(pet_id)
+    if pet is None:
+        raise LookupError("No such pet")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        earned, spent, owned = _wallet(session, owner_id)
+        if pet_id in owned:
+            raise ValueError("You already have this pet")
+        if spendable_balance(earned, spent) < pet["price"]:
+            raise PermissionError("Not enough coins yet")
+        session.add(
+            ShopPurchaseRecord(
+                owner_user_id=owner_id,
+                item_id=pet_id,
+                price=pet["price"],
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+        session.commit()
+    return shop_summary_from_db()
+
+
+def select_pet(pet_id: str) -> dict:
+    if pet_by_id(pet_id) is None:
+        raise LookupError("No such pet")
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        _, _, owned = _wallet(session, owner_id)
+        if pet_id not in owned:
+            raise ValueError("Buy this pet in the shop first")
+        settings = _pet_settings(session, owner_id)
+        if settings.active_pet != pet_id:
+            settings.pet_name = None  # a new pet starts with its own name
+        settings.active_pet = pet_id
+        session.commit()
+    return shop_summary_from_db()
+
+
+def update_pet_settings(name: Optional[str], in_page: Optional[bool]) -> dict:
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        if name is not None:
+            settings.pet_name = " ".join(name.split())[:24] or None
+        if in_page is not None:
+            settings.in_page = 1 if in_page else 0
+        session.commit()
+    return pet_state_from_db()
+
+
+def pet_state_from_db() -> dict:
+    """Everything the roaming pet needs in one call."""
+    owner_id = require_owner_id()
+    now = datetime.now(timezone.utc)
+    game = game_summary_from_db()
+    with SessionLocal() as session:
+        settings = _pet_settings(session, owner_id)
+        earned, spent, _ = _wallet(session, owner_id)
+        session.commit()
+        pet = pet_by_id(settings.active_pet) or pet_by_id(STARTER_PET)
+        state_pet = {
+            "id": pet["id"],
+            "emoji": pet["emoji"],
+            "species": pet["species"],
+            "name": settings.pet_name or pet["name"],
+        }
+        in_page = bool(settings.in_page)
+    tasks = list_tasks_from_db(TASK_OPEN)
+    today = today_in_configured_tz().isoformat()
+    return {
+        "pet": state_pet,
+        "in_page": in_page,
+        "balance": spendable_balance(earned, spent),
+        "points_today": game["points_today"],
+        "goal": game["goal"],
+        "goal_met": game["goal_met"],
+        "streak": game["streak"],
+        "reminders": build_reminders(tasks, now),
+        "due_today": [
+            {"task_id": t["id"], "text": t["text"], "priority": t["priority"]}
+            for t in tasks
+            if t.get("due_on") == today and not t.get("slot_start")
+        ][:8],
+        "overdue_count": sum(
+            1 for t in tasks if t.get("days_left") is not None and t["days_left"] < 0
+        ),
+        "at_risk": _riskiest_task(tasks, today),
+        "now": now.isoformat(),
+    }
+
+
+def _riskiest_task(tasks: list[dict], today_iso: str) -> Optional[dict]:
+    """The open, awake task the radar is most worried about, for the pet's nudge."""
+    red = [
+        t
+        for t in tasks
+        if (t.get("radar") or {}).get("level") == "at_risk"
+        and not (t.get("snoozed_until") and t["snoozed_until"][:10] > today_iso)
+    ]
+    if not red:
+        return None
+    top = max(red, key=lambda t: (t["radar"]["score"], -t["id"]))
+    return {
+        "task_id": top["id"],
+        "text": top["text"],
+        "score": top["radar"]["score"],
+        "reasons": [r["text"] for r in top["radar"]["reasons"] if r["points"] > 0][:3],
+    }
+
+
+def set_task_binned(task_id: int, binned: bool) -> Optional[dict]:
+    """Move a done or deleted task to the bin (Backlog), or restore it.
+
+    Binning never changes points. Restoring a deleted task reopens it.
+    """
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if binned and task.status == TASK_OPEN:
+            raise ValueError("Only completed or deleted tasks can be binned")
+        now = datetime.now(timezone.utc).isoformat()
+        task.binned_at = now if binned else None
+        if not binned and task.status == TASK_DISMISSED:
+            task.status = TASK_OPEN
+        task.updated_at = now
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def delete_task(task_id: int) -> Optional[dict]:
+    """Delete an open task: it leaves every list and waits in Backlog."""
+    owner_id = require_owner_id()
+    with SessionLocal() as session:
+        task = _owned_task(session, task_id, owner_id)
+        if task is None:
+            return None
+        if task.status != TASK_OPEN:
+            raise ValueError("Only open tasks can be deleted")
+        now = datetime.now(timezone.utc).isoformat()
+        task.status = TASK_DISMISSED
+        task.binned_at = now
+        task.updated_at = now
+        session.commit()
+        return _task_to_dict(session, task)
+
+
+def sections_from_db() -> dict:
+    """Every domain with its open tasks and items: the one connected view."""
+    tasks = [
+        t
+        for t in list_tasks_from_db(TASK_OPEN)
+        if not (t["snoozed_until"] and t["snoozed_until"] > today_in_configured_tz().isoformat())
+    ]
+    snoozed = [
+        t
+        for t in list_tasks_from_db(TASK_OPEN)
+        if t["snoozed_until"] and t["snoozed_until"] > today_in_configured_tz().isoformat()
+    ]
+    done_by_domain: dict[str, int] = {}
+    for t in list_tasks_from_db(TASK_COMPLETED):
+        done_by_domain[t["domain"]] = done_by_domain.get(t["domain"], 0) + 1
+    items = list_items_from_db(limit=500)
+    sections = []
+    for name in DOMAINS + [UNSORTED]:
+        s_tasks = [t for t in tasks if t["domain"] == name]
+        s_items = [i for i in items if i["domain"] == name]
+        sections.append(
+            {
+                "domain": name,
+                "tasks": s_tasks,
+                "items": s_items,
+                "open_count": len(s_tasks),
+                "item_count": len(s_items),
+                "done_count": done_by_domain.get(name, 0),
+            }
+        )
+    return {"sections": sections, "snoozed_count": len(snoozed)}
+
+
+def search_everything(query: str) -> dict:
+    """Tasks (any state, including done and deleted) and items matching words."""
+    tasks = list_tasks_from_db("all", search=query)
+    for task in tasks:
+        if task["binned_at"]:
+            task["state"] = "deleted" if task["status"] == TASK_DISMISSED else "done (binned)"
+        elif task["status"] == TASK_COMPLETED:
+            task["state"] = "done"
+        else:
+            task["state"] = "open"
+    return {"tasks": tasks, "items": list_items_from_db(search=query, limit=50)}
+
+
+def game_summary_from_db() -> dict:
+    owner_id = require_owner_id()
+    today = today_in_configured_tz()
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PointEventRecord.day, func.sum(PointEventRecord.points))
+            .where(PointEventRecord.owner_user_id == owner_id)
+            .group_by(PointEventRecord.day)
+        ).all()
+        done_today = session.scalar(
+            select(func.count(PointEventRecord.id)).where(
+                PointEventRecord.owner_user_id == owner_id,
+                PointEventRecord.day == today.isoformat(),
+            )
+        )
+    return build_game_summary(
+        {day: int(total) for day, total in rows}, today, int(done_today or 0)
+    )
 
 
 def add_pdf_item_to_db(
@@ -1363,9 +2350,26 @@ def snooze_task_in_db(task_id: int, until_iso_date: str) -> Optional[dict]:
         task = _owned_task(session, task_id, owner_id)
         if task is None:
             return None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        today = today_in_configured_tz().isoformat()
+        if until_iso_date[:10] > today:
+            _record_task_event(session, task, "snoozed", now_iso)
+        else:
+            # Waking a task (or Undo) on the day it was snoozed takes that snooze back.
+            latest = session.scalars(
+                select(TaskEventRecord)
+                .where(
+                    TaskEventRecord.task_id == task.id,
+                    TaskEventRecord.kind == "snoozed",
+                )
+                .order_by(TaskEventRecord.id.desc())
+                .limit(1)
+            ).first()
+            if latest is not None and latest.created_at[:10] == now_iso[:10]:
+                session.delete(latest)
         task.snoozed_until = until_iso_date
         task.reminder_at = until_iso_date
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        task.updated_at = now_iso
         session.commit()
         return _task_to_dict(session, task)
 
@@ -1478,6 +2482,140 @@ def get_daily_briefing() -> dict:
             f"{len(board['overdue'])} overdue, {len(board['today'])} due today, "
             f"{len(board['upcoming'])} upcoming."
         ),
+    }
+
+
+WEEKLY_REVIEW_DAYS = 7
+
+
+def _parse_stored_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def get_weekly_review(now: Optional[datetime] = None) -> dict:
+    """Facts about the owner's last seven days, computed only from stored rows.
+
+    Counts come from the database, never from a model.  The plain-language
+    summary is added separately by ``app.review``.
+    """
+    from datetime import timedelta
+
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=WEEKLY_REVIEW_DAYS)
+    owner_id = require_owner_id()
+
+    def in_window(value: Optional[str]) -> bool:
+        stamp = _parse_stored_timestamp(value)
+        return stamp is not None and since <= stamp <= now
+
+    with SessionLocal() as session:
+        items = [
+            item
+            for item in session.scalars(
+                select(InboxItemRecord)
+                .where(InboxItemRecord.owner_user_id == owner_id)
+                .order_by(InboxItemRecord.id.asc())
+            )
+            if in_window(item.created_at)
+        ]
+        item_ids = [item.id for item in items]
+
+        captured_by_type: dict[str, int] = {}
+        for item in items:
+            captured_by_type[item.item_type] = captured_by_type.get(item.item_type, 0) + 1
+
+        tasks = session.scalars(
+            select(TaskRecord).where(TaskRecord.owner_user_id == owner_id)
+        ).all()
+        # There is no completed_at column; a completed task's updated_at is
+        # the closest stored fact for when it was finished.
+        completed = [
+            {"id": task.id, "text": task.text, "priority": task.priority}
+            for task in tasks
+            if task.status == TASK_COMPLETED and in_window(task.updated_at)
+        ]
+        open_task_count = sum(1 for task in tasks if task.status == TASK_OPEN)
+
+        insights = {}
+        linked_item_ids: set[int] = set()
+        if item_ids:
+            insights = {
+                insight.item_id: insight
+                for insight in session.scalars(
+                    _owned_insights(owner_id).where(
+                        ItemInsightRecord.item_id.in_(item_ids)
+                    )
+                )
+            }
+            linked_item_ids = set(
+                session.scalars(
+                    select(TaskSourceItemRecord.item_id)
+                    .join(TaskRecord, TaskRecord.id == TaskSourceItemRecord.task_id)
+                    .where(TaskRecord.owner_user_id == owner_id)
+                    .where(TaskSourceItemRecord.item_id.in_(item_ids))
+                )
+            )
+
+        owned_topics = {
+            topic.id: topic.name
+            for topic in session.scalars(
+                select(TopicRecord).where(TopicRecord.owner_user_id == owner_id)
+            )
+        }
+        topic_counts: dict[str, int] = {}
+        for insight in insights.values():
+            topic_id = (
+                insight.user_topic_id
+                if insight.user_topic_id in owned_topics
+                else insight.topic_id
+            )
+            name = owned_topics.get(topic_id)
+            if name:
+                topic_counts[name] = topic_counts.get(name, 0) + 1
+        top_topics = [
+            {"name": name, "count": count}
+            for name, count in sorted(
+                topic_counts.items(), key=lambda pair: (-pair[1], pair[0])
+            )[:3]
+        ]
+
+        # "Forgotten" = captured this week but never organized and never
+        # turned into a task.
+        untouched = [
+            {
+                "id": item.id,
+                "item_type": item.item_type,
+                "text": (
+                    item.title
+                    or item.raw_text
+                    or item.original_filename
+                    or item.source_url
+                    or ""
+                ).strip()[:160],
+                "created_at": item.created_at,
+            }
+            for item in items
+            if item.id not in insights and item.id not in linked_item_ids
+        ]
+
+    return {
+        "since": since.isoformat(),
+        "until": now.isoformat(),
+        "days": WEEKLY_REVIEW_DAYS,
+        "captured": {"total": len(items), "by_type": captured_by_type},
+        "completed_tasks": completed,
+        "open_task_count": open_task_count,
+        "top_topics": top_topics,
+        "untouched_items": untouched[:10],
+        "untouched_count": len(untouched),
     }
 
 

@@ -185,6 +185,7 @@ COLLECTION_ROUTES = [
     "/api/analyze/latest",
     "/api/attention",
     "/api/briefing",
+    "/api/review/week",
     "/api/auth/me",
 ]
 
@@ -257,6 +258,12 @@ def test_collections_never_include_the_other_users_data(two_users):
         assert board_ids <= set(viewer.seed["task_ids"])
         briefing = client.get("/api/briefing").json()
         assert {s["task_id"] for s in briefing["priority_suggestions"]} <= set(
+            viewer.seed["task_ids"]
+        )
+        week = client.get("/api/review/week").json()
+        assert week["captured"]["total"] == len(own_ids)
+        assert {item["id"] for item in week["untouched_items"]} <= own_ids
+        assert {task["id"] for task in week["completed_tasks"]} <= set(
             viewer.seed["task_ids"]
         )
 

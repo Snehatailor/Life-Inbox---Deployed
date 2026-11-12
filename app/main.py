@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -92,6 +93,17 @@ from app.schemas import (
     Priority,
     SearchHit,
     Task,
+    DomainUpdate,
+    PetSelect,
+    PetSettingsPatch,
+    QuickTaskRequest,
+    RemindLater,
+    ShopBuy,
+    SlotRequest,
+    TaskPatch,
+    TeamCreate,
+    TeamJoin,
+    TeamSharing,
     TaskListStatus,
     TaskReminderRequest,
     TaskSnoozeRequest,
@@ -110,6 +122,13 @@ app = FastAPI(title="Life Inbox")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 init_db()
+
+
+@app.on_event("startup")
+def _start_desktop_pet() -> None:
+    from app.pet_launcher import launch_pet
+
+    launch_pet(int(os.environ.get("PORT", "8000")))
 
 _OPEN_API_PATHS = ("/api/health", "/api/auth/")
 
@@ -583,6 +602,56 @@ async def create_voice_item(file: UploadFile = File(...)):
     return _process_voice_item(item["id"])
 
 
+@app.patch("/api/items/{item_id}/domain", response_model=InboxItem)
+def patch_item_domain(item_id: int, payload: DomainUpdate):
+    from app.database import set_item_domain
+
+    try:
+        item = set_item_domain(item_id, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return item
+
+
+@app.get("/api/sorting/options")
+def sorting_options():
+    from app.sorting import DOMAINS, FORMAT_LABELS, UNSORTED
+
+    return {"domains": DOMAINS + [UNSORTED], "formats": FORMAT_LABELS}
+
+
+MAX_TEXT_FILE_BYTES = 1024 * 1024
+
+
+@app.post("/api/items/textfile", response_model=InboxItem)
+async def create_text_file_item(file: UploadFile = File(...)):
+    from pathlib import PurePosixPath
+
+    from app.database import add_text_file_item_to_db
+    from app.sorting import TEXT_FILE_EXT
+
+    name = PurePosixPath(file.filename or "file.txt").name or "file.txt"
+    if PurePosixPath(name.lower()).suffix not in TEXT_FILE_EXT:
+        raise HTTPException(
+            status_code=415,
+            detail="Supported text files: " + ", ".join(sorted(TEXT_FILE_EXT)),
+        )
+    data = await file.read(MAX_TEXT_FILE_BYTES + 1)
+    if len(data) > MAX_TEXT_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Text files must be under 1 MB.")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="That file is not UTF-8 text.") from exc
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="That file is empty.")
+    return add_text_file_item_to_db(
+        name, (file.content_type or "text/plain").split(";")[0], text
+    )
+
+
 @app.get("/api/items/{item_id}/file")
 def get_item_source_file(
     item_id: int,
@@ -817,6 +886,296 @@ def _transition_task(task_id: int, task_status: str):
     return task
 
 
+def _quick_task_from_sentence(sentence: str, tz_name: Optional[str] = None):
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.attention.dates import configured_timezone
+    from app.database import create_quick_task
+    from app.game.voice_task import REMINDER_MINUTES, parse_spoken_task
+
+    try:
+        tz = ZoneInfo(tz_name) if tz_name else configured_timezone()
+    except Exception:
+        tz = configured_timezone()
+    now = datetime.now(timezone.utc)
+    parsed = parse_spoken_task(sentence, now.astimezone(tz).date(), now, tz)
+    if len(parsed["text"]) < 2:
+        raise HTTPException(status_code=422, detail="I could not find a task in that.")
+    slot = None
+    if parsed["remind_at"] is not None:
+        slot = (parsed["remind_at"], parsed["remind_at"] + timedelta(minutes=REMINDER_MINUTES))
+    return create_quick_task(
+        parsed["text"],
+        parsed["priority"],
+        parsed["due_on"],
+        parsed["due_confidence"],
+        priority_chosen=parsed["priority_spoken"],
+        slot=slot,
+    )
+
+
+@app.post("/api/tasks/quick", response_model=Task)
+def create_quick_task_endpoint(payload: QuickTaskRequest):
+    return _quick_task_from_sentence(payload.sentence, payload.tz)
+
+
+@app.post("/api/tasks/voice", response_model=Task)
+async def create_voice_task(file: UploadFile = File(...)):
+    """Server-side fallback when the browser has no speech recognition."""
+    data = await file.read()
+    try:
+        _, mime, _ = validate_audio_upload(
+            file.filename or "voice-task.webm", file.content_type, data
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = process_voice_bytes(
+        data, original_filename=file.filename or "voice-task.webm", mime_type=mime
+    )
+    sentence = (result.get("extracted_text") or "").strip()
+    if not sentence:
+        raise HTTPException(
+            status_code=422,
+            detail="Transcription is not available. Type the task instead.",
+        )
+    return _quick_task_from_sentence(sentence)
+
+
+@app.patch("/api/tasks/{task_id}", response_model=Task)
+def patch_task(task_id: int, payload: TaskPatch):
+    from app.database import update_task_fields
+
+    try:
+        task = update_task_fields(
+            task_id,
+            payload.priority,
+            payload.due_on,
+            text=payload.text,
+            domain=payload.domain,
+            set_domain="domain" in payload.model_fields_set,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.post("/api/tasks/{task_id}/delete", response_model=Task)
+def delete_task_endpoint(task_id: int):
+    from app.database import delete_task
+
+    try:
+        task = delete_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/api/sections")
+def get_sections():
+    from app.database import sections_from_db
+
+    return sections_from_db()
+
+
+@app.get("/api/find")
+def search_all(q: str = Query("", max_length=200)):
+    from app.database import search_everything
+
+    if not q.strip():
+        return {"tasks": [], "items": []}
+    return search_everything(q)
+
+
+@app.post("/api/tasks/{task_id}/bin", response_model=Task)
+def bin_task(task_id: int):
+    from app.database import set_task_binned
+
+    try:
+        task = set_task_binned(task_id, True)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.post("/api/tasks/{task_id}/restore", response_model=Task)
+def restore_task(task_id: int):
+    from app.database import set_task_binned
+
+    task = set_task_binned(task_id, False)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/api/teams/me")
+def my_team():
+    from app.database import team_summary_from_db
+
+    return team_summary_from_db()
+
+
+@app.post("/api/teams")
+def create_team_endpoint(payload: TeamCreate):
+    from app.database import create_team
+
+    try:
+        return create_team(payload.name, payload.share)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/teams/join")
+def join_team_endpoint(payload: TeamJoin):
+    from app.database import join_team
+
+    try:
+        return join_team(payload.code, payload.share)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.patch("/api/teams/me")
+def team_sharing_endpoint(payload: TeamSharing):
+    from app.database import set_team_sharing
+
+    summary = set_team_sharing(payload.share)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="You are not in a team.")
+    return summary
+
+
+@app.post("/api/teams/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_team_endpoint():
+    from app.database import leave_team
+
+    if not leave_team():
+        raise HTTPException(status_code=404, detail="You are not in a team.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/game/briefing")
+def game_briefing():
+    from datetime import datetime as _dt
+
+    from app.attention.dates import configured_timezone, today_in_configured_tz
+    from app.database import game_summary_from_db
+    from app.game.briefing import build_briefing
+
+    return build_briefing(
+        list_tasks_from_db("open"),
+        game_summary_from_db(),
+        today_in_configured_tz(),
+        _dt.now(configured_timezone()).hour,
+    )
+
+
+@app.get("/api/shop")
+def get_shop():
+    from app.database import shop_summary_from_db
+
+    return shop_summary_from_db()
+
+
+@app.post("/api/shop/buy")
+def shop_buy(payload: ShopBuy):
+    from app.database import buy_pet
+
+    try:
+        return buy_pet(payload.item_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/pet/select")
+def pet_select(payload: PetSelect):
+    from app.database import select_pet
+
+    try:
+        return select_pet(payload.pet_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/pet/state")
+def pet_state():
+    from app.database import pet_state_from_db
+
+    return pet_state_from_db()
+
+
+@app.patch("/api/pet/settings")
+def pet_settings(payload: PetSettingsPatch):
+    from app.database import update_pet_settings
+
+    return update_pet_settings(payload.name, payload.in_page)
+
+
+@app.post("/api/tasks/{task_id}/slot", response_model=Task)
+def save_task_slot(task_id: int, payload: SlotRequest):
+    from app.database import set_task_slot
+
+    try:
+        task = set_task_slot(task_id, payload.start, payload.end)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.post("/api/tasks/{task_id}/remind-later", response_model=Task)
+def remind_task_later(task_id: int, payload: RemindLater):
+    from app.database import postpone_task_slot
+
+    try:
+        task = postpone_task_slot(task_id, payload.minutes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.delete("/api/tasks/{task_id}/slot", response_model=Task)
+def clear_task_slot(task_id: int):
+    from app.database import set_task_slot
+
+    try:
+        task = set_task_slot(task_id, None, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+@app.get("/pet", response_class=HTMLResponse)
+def pet_page():
+    return (APP_DIR / "templates" / "pet.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/game/today")
+def game_today():
+    from app.database import game_summary_from_db
+
+    return game_summary_from_db()
+
+
 @app.post("/api/tasks/{task_id}/complete", response_model=Task)
 def complete_task(task_id: int):
     return _transition_task(task_id, "completed")
@@ -901,6 +1260,22 @@ def daily_briefing():
         ) from exc
 
 
+@app.get("/api/review/week")
+def weekly_review():
+    from app.review import build_weekly_review
+
+    try:
+        return build_weekly_review()
+    except OwnerRequiredError:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load weekly review")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load weekly review. Please try again.",
+        ) from exc
+
+
 @app.get("/api/calendar/status")
 def calendar_status():
     adapter = get_calendar_adapter()
@@ -913,6 +1288,174 @@ def calendar_status():
         "mode": status.mode,
         "message": status.message,
     }
+
+
+@app.get("/api/calendar/export.ics")
+def calendar_export_ics():
+    from app.game.gcal import build_ics
+
+    tasks = list_tasks_from_db("open")
+    return Response(
+        content=build_ics(tasks),
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="life-inbox-deadlines.ics"'},
+    )
+
+
+MAX_ICS_BYTES = 2 * 1024 * 1024
+
+
+@app.post("/api/calendar/busy/import")
+async def import_busy_ics(file: UploadFile = File(...)):
+    from app.attention.dates import configured_timezone
+    from app.database import replace_busy_blocks
+    from app.game.slots import parse_ics_busy
+
+    data = await file.read(MAX_ICS_BYTES + 1)
+    if len(data) > MAX_ICS_BYTES:
+        raise HTTPException(status_code=413, detail="Calendar files must be under 2 MB.")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="That is not a UTF-8 .ics file.") from exc
+    if "BEGIN:VCALENDAR" not in text.upper():
+        raise HTTPException(status_code=400, detail="That does not look like an .ics calendar.")
+    blocks = parse_ics_busy(text, configured_timezone())
+    return {"imported": replace_busy_blocks(blocks)}
+
+
+@app.get("/api/calendar/busy")
+def busy_summary():
+    from app.database import list_busy_blocks
+
+    blocks = list_busy_blocks()
+    return {
+        "count": len(blocks),
+        "first": blocks[0]["starts_at"] if blocks else None,
+        "last": blocks[-1]["ends_at"] if blocks else None,
+    }
+
+
+@app.delete("/api/calendar/busy", status_code=status.HTTP_204_NO_CONTENT)
+def clear_busy():
+    from app.database import replace_busy_blocks
+
+    replace_busy_blocks([])
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/tasks/{task_id}/slots")
+def task_slots(task_id: int, minutes: int = Query(45, ge=15, le=240)):
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+
+    from app.attention.dates import configured_timezone
+    from app.database import get_task_for_slots, list_busy_blocks
+    from app.game.gcal import google_timed_event_url
+    from app.game.slots import suggest_slots
+
+    task = get_task_for_slots(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if task["status"] != "open":
+        raise HTTPException(status_code=400, detail="Only open tasks need a time slot.")
+    tz = configured_timezone()
+    busy_rows = list_busy_blocks()
+    busy = [
+        (_dt.fromisoformat(b["starts_at"]), _dt.fromisoformat(b["ends_at"]))
+        for b in busy_rows
+    ]
+    deadline = _date.fromisoformat(task["due_on"]) if task["due_on"] else None
+    slots = suggest_slots(busy, minutes, deadline, _dt.now(_tz.utc), tz)
+    title = f"[{task['priority']}] {task['text']}"
+    for slot in slots:
+        slot["google_url"] = google_timed_event_url(
+            title,
+            _dt.fromisoformat(slot["start"]),
+            _dt.fromisoformat(slot["end"]),
+            str(tz),
+        )
+    return {
+        "task_id": task_id,
+        "minutes": minutes,
+        "deadline": task["due_on"],
+        "calendar_loaded": bool(busy_rows),
+        "slots": slots,
+    }
+
+
+@app.get("/api/calendar/tasks")
+def calendar_tasks():
+    """Return open scheduled tasks for the in-app calendar.
+
+    This is intentionally separate from the optional external calendar
+    adapter.  Capturing or organizing a dated task always updates the Life
+    Inbox calendar; exporting it remains an explicit preview/confirm action.
+    """
+    from app.attention.dates import parse_timing_phrase, timing_phrase_from_text
+
+    tasks = [
+        {
+            "id": f"task-{task['id']}",
+            "source": "task",
+            "task_id": task["id"],
+            "text": task["text"],
+            "timing_text": task.get("timing_text"),
+            "due_on": task["due_on"],
+            "priority": task["priority"],
+        }
+        for task in list_tasks_from_db(status_filter="open")
+        if task.get("due_on")
+    ]
+    scheduled_source_ids = {
+        item_id
+        for task in list_tasks_from_db(status_filter="open")
+        if task.get("due_on")
+        for item_id in task.get("source_item_ids", [])
+    }
+    # A dated note appears immediately after capture, even before the user
+    # chooses to run the full organizer.  Once it becomes a task, the task is
+    # the single calendar entry so dates never appear twice.
+    for item in list_items_from_db(limit=500):
+        if item["id"] in scheduled_source_ids:
+            continue
+        text = item.get("raw_text") or item.get("extracted_text") or ""
+        parsed = parse_timing_phrase(text)
+        if parsed.due_date is None:
+            continue
+        tasks.append(
+            {
+                "id": f"item-{item['id']}",
+                "source": "inbox",
+                "item_id": item["id"],
+                "text": (item.get("title") or text).strip()[:180],
+                "timing_text": timing_phrase_from_text(text),
+                "due_on": parsed.normalized_iso,
+                "priority": None,
+            }
+        )
+    # Finished tasks live on the calendar (on the day they were done) and in
+    # search, not in the task list. Binned ones move to Backlog instead.
+    from app.attention.dates import configured_timezone
+    from datetime import datetime as _dt
+
+    tz = configured_timezone()
+    for task in list_tasks_from_db(status_filter="completed"):
+        if not task.get("completed_at"):
+            continue
+        done_on = _dt.fromisoformat(task["completed_at"]).astimezone(tz).date().isoformat()
+        tasks.append(
+            {
+                "id": f"done-{task['id']}",
+                "source": "done",
+                "task_id": task["id"],
+                "text": task["text"],
+                "timing_text": None,
+                "due_on": done_on,
+                "priority": task["priority"],
+                "points": task["points_awarded"],
+            }
+        )
+    return sorted(tasks, key=lambda entry: (entry["due_on"], entry["id"]))
 
 
 @app.post("/api/calendar/preview")

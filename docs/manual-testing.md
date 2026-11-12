@@ -14,26 +14,26 @@ Open http://127.0.0.1:8000
 ## Core smoke (Milestone 1+)
 
 - [ ] Home page loads with capture box, analyze button, tasks, notes
-- [ ] Save a note → appears under Raw saved notes
+- [ ] Save a note → it is sorted into a section (Sections screen) or waits under Inbox → Needs sorting
 - [ ] Edit a note → text updates; analysis status becomes stale if prior analysis existed
 - [ ] Delete a note → removed; linked orphan task disappears after analyze+delete
 - [ ] Analyze Entire Inbox → buckets, todos, priority view, mode shown
 - [ ] Reload page → latest analysis restored; tasks persist
 - [ ] Complete / dismiss / reopen a task; filter by status
 - [ ] Re-analyze after completing a task → task status unchanged
-- [ ] Search/filter notes; Clear resets filters
-- [ ] With >100 notes, “Load more” appears and appends
+- [ ] Sidebar search finds notes and tasks (including done and deleted ones); Clear search hides the results
+- [ ] With many notes, every section lists its items (up to 500 are loaded)
 - [ ] After editing inbox post-analysis, stale banner / status appears
 - [ ] Invalid empty note rejected with friendly status
 - [ ] `/api/health` returns `{"status":"ok"}`
 
 ## Organization smoke (Milestone 2+)
 
-- [ ] Dashboard shows Topics, High Priority, Open Tasks, Recently Captured, Needs Review, Related
-- [ ] Add a custom topic from the Topics form
+- [ ] Sections lists Work, Finance, Health, Study, Home, Travel, Shopping, Social and Unsorted with open / item / done counts
+- [ ] Drag a task or item onto another section; it stays there after reload
 - [ ] Multi-action note creates multiple tasks from one source
 - [ ] Confirm date on a task → labeled confirmed; survives re-analyze
-- [ ] Near-duplicate notes appear under Related Items; dismiss removes them from the active list
+- [ ] (Related-items panel was retired; `/api/relations` still works)
 - [ ] `PATCH /api/items/{id}/insight` user title/topic/priority survives re-analysis
 
 ## Ask My Inbox smoke (Milestone 4+)
@@ -103,29 +103,10 @@ Turn Dev Login on first (`LIFE_INBOX_ALLOW_DEV_LOGIN=true` in the server termina
 - [ ] After analysis, Attention section shows Today / Upcoming / Overdue / Unscheduled
 - [ ] Daily briefing summary and suggested focus appear
 - [ ] Confirm date on a timed task; original phrase preserved; due_on normalized
-- [ ] Snooze 1 day moves task into Snoozed bucket
+- [ ] Snooze (Tomorrow / In 3 days / Next week) hides the task from Today's priority sections and shows “N snoozed”
 - [ ] Preview calendar shows provider notes and requires explicit confirm
 - [ ] Confirm (mock) records a local receipt; `/api/calendar/status` shows writes_enabled=false
 - [ ] With `LIFE_INBOX_CALENDAR_PROVIDER=google`, confirm returns blocked (no OAuth/writes)
-
-## Pagination regression (delete + Load more)
-
-Automated coverage: `tests/test_pagination_state.py` (pure JS helper via Node).
-
-Browser procedure (temp DB only):
-
-1. Create notes “Pagination note 001” … “Pagination note 102” (102 notes).
-2. Reload http://127.0.0.1:8000 — first 100 appear; “Load more” visible.
-3. Delete “Pagination note 001”.
-4. Click “Load more”.
-5. Confirm notes 002–102 each appear exactly once (including 101); ID order.
-6. Rapid double-click “Load more” on a >200-note inbox — no duplicates/skips;
-   button disables while a list request is in flight.
-7. Force a failed append (stop server, click Load more) — friendly error;
-   already-displayed notes remain.
-8. Failed delete (stop server, delete) — note stays visible; pagination unchanged.
-9. Search / filters / Clear / create note / Back / Forward still reload from
-   offset 0. Editing a note does not skip or duplicate pages.
 
 ## Error states
 
@@ -137,3 +118,100 @@ Browser procedure (temp DB only):
 
 - Point `DATABASE_URL` at a real personal inbox database
 - Commit API keys or generated `.db` files
+
+## Task Quest smoke (game/task-quest)
+
+Points: High 30, Medium 20, Low 10; +5 if done a day or more early; half if overdue. Daily goal 100.
+
+- [ ] Open tasks show a "+N pts" chip and a days-left badge (green safe, amber soon, orange due today, red overdue)
+- [ ] A task with no date offers "Set deadline <date>" (High +2d, Medium +5d, Low +10d)
+- [ ] Complete a task → Today ring and points rise, "+N" pop-up shows; reopen takes the points back; complete again awards once
+- [ ] Reaching 100 shows confetti, a toast and a chime; the ring turns green; the streak starts
+- [ ] "Sound off" mutes the chime and survives a reload; reduced-motion skips confetti
+- [ ] Completed filter: drag a task onto the bin (or "Bin it"); it appears under Backlog (bin) with points kept; Restore returns it
+- [ ] Type or say "Call the dentist on Friday, high priority" → High task with the right date
+- [ ] Google Calendar nav item shows a status dot; "Add to Google Calendar" opens a prefilled event; "Download deadlines (.ics)" imports into Google Calendar
+- [ ] Drop several files, a link and text anywhere on the page → each saved; toast lists "format → domain"
+- [ ] Inbox Sort board: By domain / By format, format chips filter; drag a card to another domain → "Moved to X" with Undo, survives reload
+- [ ] Unsupported file (.docx) is refused with a clear message
+- [ ] Open tasks: drag onto a priority lane (points change) or onto a day in the 7-day strip (deadline changes)
+
+## Task Quest, phases 8-10
+
+- [ ] Google Calendar screen: import a calendar .ics; the line shows the number of busy blocks; "Clear imported calendar" removes them
+- [ ] On a High task with a deadline, "Find time" lists up to 3 slots (weekdays 09-18, before the deadline) that avoid imported meetings
+- [ ] Changing "Time needed" refreshes the slots; clicking a slot opens a prefilled Google event (nothing is saved until you confirm there)
+- [ ] Today: create a team (checkbox decides whether your points show), copy the invite code
+- [ ] In a second browser profile with a different Dev Login email, join with the code; both appear ranked by weekly points
+- [ ] Untick "Show my points on the board": you disappear from the rows and the others see "1 member keeps points private"
+- [ ] Leave team; the last person to leave deletes the team and its code stops working
+- [ ] "What's due today?" button, the `B` key, and typing or saying "what's due today?" in the task box read the briefing aloud (a toast shows the text if speech is unavailable); pressing again stops it
+
+- [ ] Desktop: the "Navigation width" slider resizes the sidebar from 96 to 360 px; below 160 px it becomes an icon-only rail (counts and the calendar dot stay visible); double-click resets to 248; the width survives a reload; the slider is hidden on phones
+
+## Sections, task row and search (workspace restructure)
+
+- [ ] Today → Needs your attention shows High, Medium and Low sections (High open); each task has Complete, Snooze, Edit, Delete and More
+- [ ] Edit changes the wording, priority, deadline and section; the task moves to the right priority section
+- [ ] Delete moves an open task to Tasks → Backlog with an Undo toast; Restore brings it back open
+- [ ] Complete removes the task from every list and shows it ticked (✓) on the Calendar on the day it was done
+- [ ] Calendar bin: drag a ✓ task into it; it leaves the Calendar and appears in Backlog with its points kept
+- [ ] Dropping an open task on the bin is refused with a clear message
+- [ ] Sidebar search for a finished task finds it, labelled Done or Done · in Backlog, with Reopen / Restore
+- [ ] Inbox only lists items that need sorting; picking a section moves the item out and the Inbox count drops
+
+## Auto-raised priority
+
+Rule: an open task with a deadline is raised to High within 2 days (or when overdue); a Low task within 5 days is raised to Medium. It never lowers. A priority you set yourself (Edit, priority lane, or saying "high/low priority" in quick-add) is pinned and never raised.
+
+- [ ] A task due in 2 days with no stated priority appears under High with an "↑ due soon" tag, worth 30 coins
+- [ ] The tag tooltip says which priority it was raised from
+- [ ] A task due in 5 days stays in its own section; "low priority" said in quick-add stays Low even when due today
+- [ ] Edit a raised task's priority to Medium: the tag disappears and it stays Medium
+- [ ] Completing a raised task awards points at the raised level
+- [ ] Leave the page open across midnight (or change the date): lists reload and tasks move up without a manual refresh
+
+- [ ] Everywhere the app showed "pts" or "points" it now shows a gold coin image or the word "coins" (task rows, priority lanes, daily ring, level line, leaderboard, toasts, spoken briefing)
+
+## Coin shop, pets and the desktop companion
+
+- [ ] Today → Daily quest → **Pet shop** shows your coin balance and 9 pets; pets you cannot afford are disabled and say how many coins are missing
+- [ ] Buy a pet: the balance drops, the daily ring / streak / level do not; buying it again is refused; **Choose** switches the active pet
+- [ ] Rename the pet; choosing a different pet gives it its own default name
+- [ ] Tick “Show my pet roaming on this page”: the pet walks along the bottom of the app; tick it off and it leaves
+- [ ] Tap the pet: the panel opens with Note and Today tabs; *Save note* puts a note in the Inbox; *Make task* creates a task
+- [ ] On a High task: ⋯ → Find a time → click a time: the task shows a 🕘 slot; ⋯ → Clear time slot removes it
+- [ ] With a slot 5 minutes away, the pet says it starts in 5 min (once); at the start it says “now”; after the slot ends with the task still open it says you missed it
+- [ ] Complete the task: the reminders stop and the pet cheers
+- [ ] Desktop companion (`desktop-pet/`): `npm install && npm start` shows the pet over other apps; clicks pass through everywhere except the pet and its panel; the tray icon shows/hides or quits it
+- [ ] With Life Inbox stopped, the companion waits and recovers when it starts
+
+## Quick reminders ("in 20 min", "at 5pm")
+
+- [ ] Task box or pet panel → "Check the oven in 2 minutes" → Make task: the task is "Check the oven", with a 🕘 slot 2 minutes ahead and a toast "Reminder set for …"
+- [ ] The pet says "time for Check the oven — now!" within about 20 seconds of that time, once, and does not announce it when you create it
+- [ ] "i need to send a link in 20 minutes. remind me in 5 mins" reminds at 5 minutes (the "remind me" time wins)
+- [ ] "call mom at 5pm" and "pay the bill tomorrow at 9am" use your own time zone; a time already past today with "today" in the sentence makes no reminder
+- [ ] Typing a time in the pet's note box shows "That has a time. Press Make task…"; "Save note" never creates a reminder
+
+## Pet asks: done or snooze 5 min?
+
+- [ ] When a reminder is due the pet's bubble says "…Is it done, or snooze 5 min?" with **✓ Done** and **⏰ 5 min**; for an early heads-up it says "Ready? Or snooze 5 min?"
+- [ ] **✓ Done** completes the task (coins awarded, the pet cheers) and the next waiting reminder is asked
+- [ ] **⏰ 5 min** moves the slot 5 minutes later (same length), the task stays open, and the pet asks again at the new time without a heads-up in between
+- [ ] Two reminders at once: the bubble shows "(+1 more)" and the second is asked after the first is answered
+- [ ] The bubble stays fully on screen when the pet is at the left or right edge
+- [ ] While the note panel is open the pet holds reminders back; closing the panel shows them
+- [ ] Today tab: reminder rows have ⏰ (snooze 5 min) beside ✓
+
+## Procrastination Radar
+
+- [ ] Every open task shows a radar badge: 🟢, 🟡 Watch or 🔴 At risk. Hover over it (or tap it) to see the score and each reason with its points
+- [ ] A task due in 17 days with no history is 🟢 with "Nothing is pushing this task yet"
+- [ ] Snooze a task due in 3 days twice (Snooze → Tomorrow): it shows "Snoozed 2 times" and turns 🟡. Undo on the snooze toast takes one snooze back
+- [ ] A red task has **▶ Start 10 min**: it books a 10-minute slot (🕘), the score drops by 15 ("Time slot booked"), and after 10 minutes the pet asks "done, or snooze 5 min?"
+- [ ] Completing a red task shows "+10 rescue bonus" in the toast; Undo takes the bonus back with the coins
+- [ ] A task that is red only because of snoozes gives no rescue bonus
+- [ ] With the pet roaming, a red task gets one nudge per day ("… is slipping. Want to just start for 10 minutes?") after the greeting; **Not now** stops it for today
+- [ ] Done and binned tasks show no badge
+- [ ] Two users (Dev Login on): one user's late history and snoozes never change the other's badges
