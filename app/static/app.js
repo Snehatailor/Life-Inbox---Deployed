@@ -1885,7 +1885,8 @@ async function completeTask(task, row) {
     const done = await taskAction(`/api/tasks/${task.id}/complete`, undefined, 'Unable to complete task.');
     await new Promise(resolve => setTimeout(resolve, 300));
     const rescued = done && done.rescue_bonus ? ` · +${done.rescue_bonus} rescue bonus! You beat the procrastination on this one.` : '';
-    showToast(`Done: ${task.text}${rescued}`, {
+    const next = done && done.next_due_on ? ` · ↻ Next one ${relativeDueLabel(done.next_due_on).toLowerCase()} (${done.next_due_on})` : '';
+    showToast(`Done: ${task.text}${rescued}${next}`, {
       actionLabel: 'Undo',
       onAction: async () => {
         await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to undo.');
@@ -1950,6 +1951,17 @@ async function patchTask(taskId, body, message) {
   }
 }
 
+const REPEAT_CHOICES = [
+  ['', 'Does not repeat'],
+  ['daily', 'Every day'],
+  ['weekdays', 'Weekdays (Mon–Fri)'],
+  ['weekly', 'Every week'],
+  ['days', 'Chosen days…']
+];
+const REPEAT_DAYS = [
+  ['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']
+];
+
 function openTaskEditor(task, row) {
   const form = h('form', 'task-edit');
   const text = h('input');
@@ -1979,11 +1991,36 @@ function openTaskEditor(task, row) {
     option.selected = task.domain_source === 'user' && task.domain === name;
     domain.append(option);
   }
-  for (const [label, control] of [['Priority', priority], ['Deadline', due], ['Section', domain]]) {
+  const repeat = h('select');
+  for (const [value, label] of REPEAT_CHOICES) {
+    const option = h('option', '', label);
+    option.value = value;
+    repeat.append(option);
+  }
+  const currentRule = task.repeat_rule || '';
+  const chosenDays = currentRule.startsWith('days:') ? currentRule.slice(5).split(',') : [];
+  repeat.value = currentRule.startsWith('days:') ? 'days' : currentRule;
+  for (const [label, control] of [['Priority', priority], ['Deadline', due], ['Section', domain], ['Repeat', repeat]]) {
     const wrap = h('label', '', label);
     wrap.append(control);
     grid.append(wrap);
   }
+  const dayPicker = h('div', 'repeat-days');
+  dayPicker.setAttribute('role', 'group');
+  dayPicker.setAttribute('aria-label', 'Repeat on these days');
+  for (const [code, label] of REPEAT_DAYS) {
+    const day = h('button', 'repeat-day', label);
+    day.type = 'button';
+    day.dataset.day = code;
+    day.setAttribute('aria-pressed', String(chosenDays.includes(code)));
+    day.addEventListener('click', () => {
+      day.setAttribute('aria-pressed', String(day.getAttribute('aria-pressed') !== 'true'));
+    });
+    dayPicker.append(day);
+  }
+  const syncDays = () => { dayPicker.hidden = repeat.value !== 'days'; };
+  repeat.addEventListener('change', syncDays);
+  syncDays();
   const buttons = h('div', 'task-actions');
   const save = h('button', '', 'Save');
   save.type = 'submit';
@@ -1991,7 +2028,7 @@ function openTaskEditor(task, row) {
   cancel.type = 'button';
   cancel.addEventListener('click', () => refreshAll());
   buttons.append(save, cancel);
-  form.append(text, grid, buttons);
+  form.append(text, grid, dayPicker, buttons);
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -2002,6 +2039,16 @@ function openTaskEditor(task, row) {
     const wanted = domain.value || null;
     const current = task.domain_source === 'user' ? task.domain : null;
     if (wanted !== current) body.domain = wanted;
+    let wantedRule = repeat.value;
+    if (wantedRule === 'days') {
+      const days = [...dayPicker.querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.day);
+      if (!days.length) {
+        showToast('Pick at least one day to repeat on.');
+        return;
+      }
+      wantedRule = `days:${days.join(',')}`;
+    }
+    if ((wantedRule || null) !== (task.repeat_rule || null)) body.repeat_rule = wantedRule || null;
     if (!Object.keys(body).length) {
       await refreshAll();
       return;
@@ -2036,6 +2083,11 @@ function rowBadges(task) {
   if (task.radar) wrap.append(radarBadge(task.radar));
   if (isSnoozed(task)) wrap.append(h('span', 'pill snoozed-pill', `Snoozed until ${task.snoozed_until}`));
   if (task.slot_start) wrap.append(h('span', 'pill slot-pill', `🕘 ${formatSlot(task.slot_start, task.slot_end)}`));
+  if (task.repeat_label) {
+    const repeatBadge = h('span', 'pill repeat-pill', `↻ ${task.repeat_label}`);
+    repeatBadge.title = `Repeats: ${task.repeat_label}. Completing it creates the next one.`;
+    wrap.append(repeatBadge);
+  }
   return wrap;
 }
 

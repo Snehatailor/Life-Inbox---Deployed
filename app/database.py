@@ -30,6 +30,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.attention.dates import today_in_configured_tz
+from app.game.recurrence import describe as describe_repeat
+from app.game.recurrence import next_due as next_repeat_due
+from app.game.recurrence import normalize_rule as normalize_repeat_rule
 from app.game.gcal import google_event_url
 from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
@@ -271,6 +274,10 @@ class TaskRecord(Base):
     slot_start = Column(Text, nullable=True)
     slot_end = Column(Text, nullable=True)
     slot_set_at = Column(Text, nullable=True)
+    # Recurring tasks: the rule (daily, weekdays, weekly, days:mon,wed) and
+    # the copy made when this one was completed (reused, never duplicated).
+    repeat_rule = Column(Text, nullable=True)
+    next_task_id = Column(Integer, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
@@ -1341,6 +1348,9 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
             if task.due_on
             else None
         ),
+        "repeat_rule": task.repeat_rule,
+        "repeat_label": describe_repeat(task.repeat_rule),
+        "next_task_id": task.next_task_id,
         "completed_at": task.completed_at,
         "points_awarded": task.points_awarded,
         "binned_at": task.binned_at,
@@ -1527,6 +1537,8 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
                         created_at=now.isoformat(),
                     )
                 )
+                if task.repeat_rule:
+                    _ensure_next_occurrence(session, task, owner_id, today, now)
             elif task.status == "completed" and task_status != "completed":
                 # Reopening or dismissing takes the points back, so
                 # complete -> reopen -> complete cannot farm points.
@@ -1550,7 +1562,56 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         if _radar_applies(result):
             _attach_radar(session, owner_id, [result], _open_task_dicts(session, owner_id))
         result["rescue_bonus"] = bonus
+        if task.next_task_id:
+            following = _owned_task(session, task.next_task_id, owner_id)
+            result["next_due_on"] = following.due_on if following is not None else None
         return result
+
+
+def _ensure_next_occurrence(session, task: "TaskRecord", owner_id: int, today, now) -> None:
+    """Give a completed repeating task exactly one next copy.
+
+    Complete -> reopen -> complete finds the copy made the first time (via
+    next_task_id) and reuses it, so a series never gets duplicates.
+    """
+    from datetime import date as _date
+
+    if task.next_task_id and _owned_task(session, task.next_task_id, owner_id) is not None:
+        return
+    try:
+        current_due = _date.fromisoformat(task.due_on) if task.due_on else None
+    except ValueError:
+        current_due = None
+    due = next_repeat_due(task.repeat_rule, current_due, today).isoformat()
+    stamp = now.isoformat()
+    copy = TaskRecord(
+        text=task.text,
+        priority=task.priority,
+        priority_source=task.priority_source,
+        timing_text=due,
+        timing_confirmed=1,
+        due_on=due,
+        due_confidence="high",
+        status=TASK_OPEN,
+        dedup_key=hashlib.sha256(
+            f"repeat:{owner_id}:{task.id}:{due}:{stamp}".encode("utf-8")
+        ).hexdigest(),
+        owner_user_id=owner_id,
+        domain=task.domain,
+        domain_source=task.domain_source,
+        repeat_rule=task.repeat_rule,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    if task.domain is None:
+        # A task organized from a note gets its section from that note; keep
+        # the section on the copy, which has no source note of its own.
+        domain, _source = _task_domain(session, task, _task_source_ids(session, task.id))
+        if domain and domain != UNSORTED:
+            copy.domain, copy.domain_source = domain, "user"
+    session.add(copy)
+    session.flush()
+    task.next_task_id = copy.id
 
 
 def set_item_domain(item_id: int, domain: Optional[str]) -> Optional[dict]:
@@ -1635,11 +1696,16 @@ def update_task_fields(
     text: Optional[str] = None,
     domain: Optional[str] = None,
     set_domain: bool = False,
+    repeat_rule: Optional[str] = None,
+    set_repeat: bool = False,
 ) -> Optional[dict]:
-    """Edit an open task: wording, priority, deadline or section.
+    """Edit an open task: wording, priority, deadline, section or repeat.
 
     `domain=None` with `set_domain=True` clears a person's choice back to auto.
+    `repeat_rule=None` with `set_repeat=True` stops the series (copies stay).
     """
+    if set_repeat:
+        repeat_rule = normalize_repeat_rule(repeat_rule)
     if priority is not None and priority not in PRIORITY_POINTS:
         raise ValueError("Unknown priority")
     if due_on is not None:
@@ -1672,6 +1738,8 @@ def update_task_fields(
                 task.domain, task.domain_source = None, None
             else:
                 task.domain, task.domain_source = domain, "user"
+        if set_repeat:
+            task.repeat_rule = repeat_rule
         task.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
         return _task_to_dict(session, task)

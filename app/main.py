@@ -1068,6 +1068,8 @@ def patch_task(task_id: int, payload: TaskPatch):
             text=payload.text,
             domain=payload.domain,
             set_domain="domain" in payload.model_fields_set,
+            repeat_rule=payload.repeat_rule,
+            set_repeat="repeat_rule" in payload.model_fields_set,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

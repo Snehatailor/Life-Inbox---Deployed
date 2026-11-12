@@ -230,6 +230,13 @@ def load_demo_data(owner_id: int) -> dict:
     done_a = quick("Water the plants", "Low", 0)
     done_b = quick("Reply to the recruiter email", "Medium", 0)
     binned = quick("Return the library book", "Low", -1)
+    # Habits: recurring tasks. "Water the plants" repeats daily and is completed
+    # below, so its next copy shows up for tomorrow.
+    revise = quick("Revise DSA for 30 minutes", "Medium", 0)
+    gym = quick("Gym", "High", 0)
+    db.update_task_fields(revise, repeat_rule="daily", set_repeat=True)
+    db.update_task_fields(gym, repeat_rule="days:mon,wed,fri", set_repeat=True)
+    db.update_task_fields(done_a, repeat_rule="daily", set_repeat=True)
 
     db.set_task_status(done_a, "completed")
     db.set_task_status(done_b, "completed")
@@ -243,11 +250,13 @@ def load_demo_data(owner_id: int) -> dict:
 
     tasks_after = db.list_tasks_from_db(status_filter="all")
     demo_items = set(record["items"])
+    demo_task_ids = {overdue, due_today, tomorrow, upcoming, later, unscheduled, done_a, done_b, binned, revise, gym}
+    demo_task_ids |= {task["next_task_id"] for task in tasks_after if task["id"] in demo_task_ids and task.get("next_task_id")}
     created = [
         task for task in tasks_after
         if task["id"] not in tasks_before
         and (
-            task["id"] in {overdue, due_today, tomorrow, upcoming, later, unscheduled, done_a, done_b, binned}
+            task["id"] in demo_task_ids
             or set(task.get("source_item_ids") or []) & demo_items
         )
     ]
