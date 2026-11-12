@@ -39,7 +39,7 @@ _MDY = re.compile(
     r"dec(?:ember)?)\s+(\d{1,2})(?:,?\s*(20\d{2}))?\b",
     re.I,
 )
-_IN_DAYS = re.compile(r"\bin\s+(\d+)\s+days?\b", re.I)
+_IN_DAYS = re.compile(r"\b(?:in|after)\s+(\d+)\s+days?\b", re.I)
 _WEEKDAY = re.compile(
     r"\b(next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     re.I,
@@ -80,6 +80,32 @@ _WEEKDAYS = {
     "saturday": 5,
     "sunday": 6,
 }
+
+
+def timing_phrase_from_text(text: Optional[str]) -> Optional[str]:
+    """Return the first supported date expression exactly as it was written.
+
+    The organizer keeps this text with a task so the UI can show a live
+    relative label without rewriting a person's original note.  This helper is
+    intentionally shared by the fallback organizer and the date parser: a
+    date such as ``Oct 18`` must not disappear just because an AI provider is
+    unavailable.
+    """
+    original = (text or "").strip()
+    if not original:
+        return None
+    matches = []
+    for pattern in (_ISO, _MDY, _IN_DAYS, _WEEKDAY):
+        found = pattern.search(original)
+        if found:
+            matches.append(found)
+    for keyword in ("day after tomorrow", "tomorrow", "today", "this weekend"):
+        found = re.search(rf"\b{re.escape(keyword)}\b", original, re.I)
+        if found:
+            matches.append(found)
+    if not matches:
+        return None
+    return min(matches, key=lambda match: match.start()).group(0)
 
 
 def parse_timing_phrase(

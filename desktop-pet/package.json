@@ -1,0 +1,13 @@
+{
+  "name": "life-inbox-pet",
+  "version": "0.1.0",
+  "description": "Desktop companion for Life Inbox: your pet roams your screen, takes notes and reminds you of tasks.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

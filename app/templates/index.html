@@ -2,58 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
   <title>Life Inbox</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230071e3'/%3E%3Cpath d='M8 17h4l2 3h4l2-3h4M8 17l2.5-7h11L24 17v5H8z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/pet.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="#top" aria-label="Life Inbox home">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M4 13h4l1.5 2.5h5L16 13h4M4 13l2.2-7h11.6L20 13v6H4z" /></svg>
-        </span>
-        <span class="brand-name">Life Inbox</span>
-      </a>
-      <nav id="sectionNav" class="section-nav" aria-label="Sections" hidden>
-        <a href="#capture">Capture</a>
-        <a href="#ask">Ask</a>
-        <a href="#today">Today</a>
-        <a href="#overview">Overview</a>
-        <a href="#tasks-section">Tasks</a>
-        <a href="#inbox">Inbox</a>
-      </nav>
-      <div class="account">
-        <button id="settingsButton" type="button" class="icon-button" onclick="openSettings()" aria-label="Settings" title="Settings" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg>
-        </button>
-        <span id="authUser" class="account-name">Checking session…</span>
-        <button id="signOutButton" type="button" class="secondary small" onclick="logoutSession()" hidden>Sign out</button>
-      </div>
-    </div>
-  </header>
-
-  <main class="wrap" id="top">
-    <section class="hero" aria-label="Welcome">
-      <div id="signedOutNotice" class="hero-copy" hidden>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="coinGold" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffe680"/>
+        <stop offset="1" stop-color="#e3a300"/>
+      </linearGradient>
+    </defs>
+    <symbol id="coin" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="11" fill="url(#coinGold)" stroke="#b97a00" stroke-width="1.2"/>
+      <circle cx="12" cy="12" r="7.6" fill="none" stroke="#b97a00" stroke-opacity=".55" stroke-width="1.2"/>
+      <path d="m12 7.2 1.55 3.15 3.45.5-2.5 2.45.6 3.45L12 15.1l-3.1 1.65.6-3.45L7 10.85l3.45-.5Z" fill="#b97a00" fill-opacity=".85"/>
+    </symbol>
+  </svg>
+  <div id="authGate" class="auth-gate" hidden>
+    <div class="auth-gate-inner">
+      <div class="hero-copy">
         <p class="eyebrow">Your second brain, kept private</p>
         <h1 class="display">Capture anything.<br />Find it when it matters.</h1>
-        <p class="lede">Notes, links, PDFs, screenshots and voice memos land in one calm inbox. Life Inbox sorts them into topics, pulls out tasks and dates, and answers questions with sources from your own items.</p>
+        <p class="lede">Notes, links, PDFs, screenshots and voice memos land in one calm inbox. Life Inbox turns them into tasks with dates, points and streaks, and answers questions from your own items.</p>
         <ul class="feature-list">
           <li><span class="dot dot-blue" aria-hidden="true"></span>Every account only sees its own notes</li>
-          <li><span class="dot dot-green" aria-hidden="true"></span>Today, upcoming and overdue at a glance</li>
+          <li><span class="dot dot-green" aria-hidden="true"></span>Daily quests, streaks and a pet that cheers you on</li>
           <li><span class="dot dot-orange" aria-hidden="true"></span>Answers cite your items, never guesses</li>
         </ul>
       </div>
-
-      <div id="authCard" class="card auth-card">
+      <div id="authCard" class="auth-card">
         <h2 class="card-title" id="authTitle">Sign in</h2>
         <p class="card-sub">Use your email, or continue with Google.</p>
-        <form id="passwordForm" class="auth-form" onsubmit="passwordAuth(event)" hidden>
+        <form id="passwordForm" class="gate-form" onsubmit="passwordAuth(event)">
           <label class="field">
             <span>Email</span>
             <input id="authEmail" type="email" maxlength="200" autocomplete="email" placeholder="you@example.com" required />
@@ -76,7 +60,7 @@
             Continue with Google
           </a>
         </div>
-        <form id="devLoginForm" class="auth-form dev-form" onsubmit="devLogin(event)" hidden>
+        <form id="devLoginForm" class="gate-form dev-form" onsubmit="devLogin(event)" hidden>
           <label class="field">
             <span>Dev login email <em>(no password, local testing only)</em></span>
             <input id="devLoginEmail" type="email" maxlength="200" placeholder="you@example.com" required />
@@ -85,235 +69,393 @@
         </form>
         <p id="authStatus" class="status" role="status" aria-live="polite"></p>
       </div>
-    </section>
+    </div>
+  </div>
 
-    <div id="appContent" hidden>
+  <div class="app-shell">
+    <!-- One nav: a sidebar on wide screens, a bottom tab bar on phones. -->
+    <aside class="sidebar">
+      <a class="brand" href="#today">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        </span>
+        <span class="brand-text">Life Inbox</span>
+      </a>
 
-      <section id="capture" class="section">
-        <div class="section-head">
-          <h2>Capture</h2>
-          <p class="sub">Drop it in now, organize later.</p>
+      <form class="global-search" role="search" onsubmit="searchEverything(event)">
+        <label for="globalSearch" class="visually-hidden">Search everything</label>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="globalSearch" type="search" maxlength="200" placeholder="Search everything" autocomplete="off" />
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+
+      <nav class="main-nav" aria-label="Life Inbox screens">
+        <a href="#today" data-view-link="today">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+          <span>Today</span>
+        </a>
+        <a href="#inbox" data-view-link="inbox">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+          <span>Inbox</span>
+          <span class="nav-count" data-count="inbox" hidden></span>
+        </a>
+        <a href="#tasks" data-view-link="tasks">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Tasks</span>
+          <span class="nav-count" data-count="tasks" hidden></span>
+        </a>
+        <a href="#calendar" data-view-link="calendar">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>Google Calendar</span>
+          <span id="gcalDot" class="gcal-dot" title="Google Calendar status"></span>
+        </a>
+        <a href="#ask" data-view-link="ask">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Ask</span>
+        </a>
+        <a href="#sections" data-view-link="sections">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Sections</span>
+        </a>
+      </nav>
+
+      <div class="nav-resize">
+        <label for="navWidth"><span class="nav-resize-text">Navigation width</span><span class="visually-hidden">Navigation width</span></label>
+        <input id="navWidth" type="range" min="96" max="360" step="4" value="248" aria-valuetext="Wide" title="Drag to resize the navigation. Double-click to reset.">
+      </div>
+
+      <button type="button" class="ghost shortcuts-button" onclick="openShortcuts()">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+        <span class="shortcuts-text">Keyboard shortcuts</span>
+      </button>
+
+      <details class="account">
+        <summary>
+          <span class="account-avatar" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          </span>
+          <span id="authUser" class="account-name">Checking session…</span>
+        </summary>
+        <div class="account-menu">
+          <button id="settingsButton" type="button" class="ghost account-item" onclick="openSettings()">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg>
+            <span>Settings</span>
+          </button>
+          <button id="desktopPetToggle" type="button" class="ghost account-item pet-switch" role="switch" aria-checked="false" onclick="toggleDesktopPet()" hidden>
+            <span aria-hidden="true">🐾</span>
+            <span>Desktop pet</span>
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </button>
+          <p id="desktopPetStatus" class="status muted" role="status" aria-live="polite"></p>
+          <button id="signOutButton" type="button" class="ghost account-item" onclick="logoutSession()" hidden>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+            <span>Sign out</span>
+          </button>
         </div>
-        <div class="card composer">
-          <div class="segmented" role="tablist" aria-label="Capture type">
-            <button type="button" role="tab" class="seg" data-pane="note" aria-selected="true">Note</button>
-            <button type="button" role="tab" class="seg" data-pane="link" aria-selected="false">Link</button>
-            <button type="button" role="tab" class="seg" data-pane="pdf" aria-selected="false">PDF</button>
-            <button type="button" role="tab" class="seg" data-pane="image" aria-selected="false">Image</button>
-            <button type="button" role="tab" class="seg" data-pane="voice" aria-selected="false">Voice</button>
-          </div>
+      </details>
+    </aside>
 
-          <div class="pane" data-pane="note" role="tabpanel">
-            <textarea id="noteText" aria-label="Note" placeholder="Met Rohan yesterday. He recommended Atomic Habits. Need to order it this weekend. Also ask him about that Gurgaon restaurant."></textarea>
-            <div class="pane-actions">
-              <span class="hint">Tip: mention “tomorrow”, “Friday” or “next week” and it becomes a dated task.</span>
-              <button id="addNoteButton" type="button" onclick="addNote()">Add Note</button>
-            </div>
-          </div>
+    <main class="content">
 
-          <div class="pane url-capture" data-pane="link" role="tabpanel" hidden>
-            <label class="field" for="urlText"><span>Web page</span></label>
-            <input id="urlText" type="url" maxlength="2000" placeholder="https://example.com/article" />
-            <div class="pane-actions">
-              <span class="hint">We save the link and read the article text for you.</span>
-              <button id="addUrlButton" type="button" onclick="addUrl()">Save Link</button>
-            </div>
-          </div>
-
-          <div class="pane pdf-capture" data-pane="pdf" role="tabpanel" hidden>
-            <label class="dropzone" for="pdfFile">
-              <span class="dropzone-title">Choose a PDF</span>
-              <span class="hint">Text-based PDFs are read automatically.</span>
-              <input id="pdfFile" type="file" accept="application/pdf,.pdf" />
-            </label>
-            <div class="pane-actions">
-              <span class="hint"></span>
-              <button id="addPdfButton" type="button" onclick="addPdf()">Upload PDF</button>
-            </div>
-          </div>
-
-          <div class="pane image-capture" data-pane="image" role="tabpanel" hidden>
-            <label class="dropzone" for="imageFile">
-              <span class="dropzone-title">Choose an image or screenshot</span>
-              <span class="hint">PNG, JPEG, WebP or GIF.</span>
-              <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" />
-            </label>
-            <div class="pane-actions">
-              <span class="hint"></span>
-              <button id="addImageButton" type="button" onclick="addImage()">Upload Image</button>
-            </div>
-          </div>
-
-          <div class="pane voice-capture" data-pane="voice" role="tabpanel" hidden>
-            <div class="voice-actions">
-              <button id="recordVoiceButton" type="button" class="record" onclick="toggleVoiceRecording()">Record</button>
-              <label class="dropzone compact" for="voiceFile">
-                <span class="dropzone-title">or choose an audio file</span>
-                <input id="voiceFile" type="file" accept="audio/*,video/webm,.webm,.wav,.mp3,.m4a,.ogg" />
-              </label>
-              <button id="addVoiceButton" type="button" class="secondary" onclick="addVoice()">Upload Audio</button>
-            </div>
-            <p id="voiceStatus" class="status" role="status" aria-live="polite"></p>
-          </div>
-        </div>
-
-        <div class="card organize">
+      <!-- TODAY -->
+      <section id="view-today" class="view" data-view="today" aria-labelledby="todayGreeting">
+        <header class="view-header">
           <div>
-            <h3>Organize everything</h3>
-            <p class="sub">Group items into topics, set priorities and pull out tasks with dates.</p>
+            <p id="todayDate" class="eyebrow"></p>
+            <h1 id="todayGreeting">Today</h1>
           </div>
-          <button id="analyzeButton" type="button" class="accent" onclick="analyzeInbox()">Analyze Entire Inbox with AI</button>
+        </header>
+
+        <div id="captureCard" class="card capture-card">
+          <label for="noteText" class="visually-hidden">Capture a note, link or file</label>
+          <textarea id="noteText" aria-describedby="captureHint" placeholder="What's on your mind? Type a note, paste a link, or drop a PDF, image or audio file here."></textarea>
+          <div id="captureAttachment" class="capture-attachment" hidden></div>
+          <p id="captureHint" class="capture-hint" hidden></p>
+          <div class="capture-actions">
+            <div class="capture-tools">
+              <input id="captureFile" type="file" class="visually-hidden" tabindex="-1" aria-hidden="true"
+                accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,audio/*,video/webm,.webm,.wav,.mp3,.m4a,.ogg"
+                onchange="attachCaptureFile(this.files[0])" />
+              <button type="button" class="icon-button" onclick="document.getElementById('captureFile').click()" aria-label="Attach a PDF, image or audio file" title="Attach a PDF, image or audio file">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <button id="recordVoiceButton" type="button" class="icon-button" onclick="toggleVoiceRecording()" aria-pressed="false" aria-label="Record a voice note" title="Record a voice note">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></svg>
+              </button>
+              <span id="voiceStatus" class="capture-voice-status" role="status" aria-live="polite"></span>
+            </div>
+            <div class="capture-submit">
+              <span id="captureShortcut" class="capture-shortcut" aria-hidden="true">Ctrl + Enter</span>
+              <button id="addNoteButton" type="button" onclick="addNote()">Save</button>
+            </div>
+          </div>
+          <p id="noteStatus" class="status muted" role="status" aria-live="polite"></p>
         </div>
-        <p id="noteStatus" class="status" role="status" aria-live="polite"></p>
+
+        <section id="questCard" class="card quest-card" aria-labelledby="questHeading">
+          <div class="quest-ring-wrap">
+            <svg class="quest-ring" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+              <circle id="questRing" class="ring-fill" cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="quest-ring-text">
+              <strong id="questPoints">0</strong>
+              <span>/ <span id="questGoal">100</span> <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></span>
+            </div>
+            <span id="questPop" class="quest-pop" aria-hidden="true"></span>
+          </div>
+          <div class="quest-body">
+            <h2 id="questHeading">Daily quest</h2>
+            <p id="questLine" class="sub">Earn 100 coins today.</p>
+            <p class="quest-meta">
+              <span id="questLevel" class="pill"></span>
+              <span id="questStreak"></span>
+              <span id="questDone"></span>
+            </p>
+            <div class="level-track" aria-hidden="true"><i id="levelFill"></i></div>
+            <small id="levelNext" class="muted"></small>
+            <div id="questWeek" class="quest-week" aria-label="Last 7 days"></div>
+            <div class="quest-tools">
+              <button type="button" id="shopButton" class="secondary" title="Spend coins on pets">🛍️ Pet shop · <span id="shopBalance"></span></button>
+              <button type="button" id="briefingButton" class="secondary" title="Read today's tasks aloud (B)">🗣️ What's due today?</button>
+              <button type="button" id="soundToggle" class="ghost" aria-pressed="true">🔊 Sound on</button>
+              <details class="quest-help">
+                <summary>How it works</summary>
+                <ul>
+                  <li>Finish tasks to earn coins: <b>High 30</b>, <b>Medium 20</b>, <b>Low 10</b>.</li>
+                  <li>Done a day or more early: <b>+5</b>. Overdue: <b>half</b> coins.</li>
+                  <li>Reach <b>100</b> coins in a day to keep your 🔥 streak.</li>
+                  <li>Binned tasks keep their coins. Reopening a task takes them back.</li>
+                  <li>Say or type a task, drag tasks onto a priority or a day, and drop files anywhere.</li>
+                </ul>
+              </details>
+            </div>
+          </div>
+        </section>
+
+        <section id="teamCard" class="card team-card" aria-labelledby="teamHeading">
+          <h2 id="teamHeading">Team leaderboard</h2>
+          <div id="teamBody"><p class="muted">Loading…</p></div>
+        </section>
+
+        <div class="today-grid">
+          <section class="today-attention" aria-labelledby="attentionHeading">
+            <h2 id="attentionHeading">Needs your attention</h2>
+            <p class="sub">Your open tasks by priority. Open a section to complete, snooze, edit or delete a task.</p>
+            <div id="attention" class="prio-list"></div>
+          </section>
+
+          <section class="today-week" aria-labelledby="weekHeading">
+            <h2 id="weekHeading">My week</h2>
+            <p class="sub">What you captured, finished and left untouched in the last 7 days.</p>
+            <button id="weeklyReviewButton" type="button" class="secondary" onclick="loadWeeklyReview()">Review my week</button>
+            <p id="weeklyReviewStatus" class="status muted" role="status" aria-live="polite"></p>
+            <div id="weeklyReview" class="panel" hidden></div>
+          </section>
+        </div>
       </section>
 
-      <section id="ask" class="section">
-        <div class="section-head">
-          <h2>Ask My Inbox</h2>
-          <p class="sub">Questions answered from your saved notes, links and PDFs, with sources.</p>
-        </div>
-        <form id="askForm" class="card ask-form" onsubmit="askInbox(event)">
-          <div class="ask-row">
-            <input id="askQuestion" type="search" maxlength="500" aria-label="Question" placeholder="What did I plan about car insurance?" required />
-            <button type="submit" id="askButton">Ask</button>
+      <!-- INBOX -->
+      <section id="view-inbox" class="view" data-view="inbox" aria-labelledby="inboxHeading" hidden>
+        <header class="view-header">
+          <div>
+            <h1 id="inboxHeading">Inbox</h1>
+            <p class="sub">New items that do not clearly belong anywhere yet. Everything sorted lives in Sections.</p>
           </div>
-          <div class="ask-examples">
-            <button type="button" class="chip" onclick="fillAskExample('What deadlines or renewals did I mention?')">Renewals</button>
-            <button type="button" class="chip" onclick="fillAskExample('What books or articles should I read?')">Reading list</button>
-            <button type="button" class="chip" onclick="fillAskExample('What restaurant recommendations do I have?')">Restaurants</button>
-          </div>
-        </form>
-        <p id="askStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="askOutput" class="panel ask-output">
-          <span class="muted">Answers cite inbox items. If the evidence is weak, Life Inbox says so instead of guessing.</span>
-        </div>
-      </section>
+          <button id="analyzeButton" type="button" onclick="analyzeInbox()">Analyze Entire Inbox with AI</button>
+        </header>
+        <p id="analysisStatus" class="status muted" role="status" aria-live="polite"></p>
 
-      <section id="today" class="section">
-        <div class="section-head">
-          <h2>Today</h2>
-          <p class="sub">Overdue, today, upcoming and unscheduled tasks. Dates keep your original words and ask before assuming.</p>
-        </div>
-        <p id="briefingStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="briefing" class="panel briefing">
-          <span class="muted">Open tasks with timing appear here after analysis.</span>
-        </div>
-        <div id="attention" class="attention-grid"></div>
-        <p id="calendarStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="calendarPreview" class="panel subtle">
-          <span class="muted">Calendar previews ask for confirmation and never write to Google.</span>
-        </div>
-      </section>
+        <div id="searchResults" class="search-results" hidden></div>
 
-      <section id="overview" class="section">
-        <div class="section-head">
-          <h2>Overview</h2>
-          <p class="sub">Topics, priorities and related items from your latest analysis.</p>
-        </div>
-        <p id="dashboardStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="dashboard" class="dashboard">
-          <span class="muted">Analyze your inbox to fill in topics, priorities and related items.</span>
-        </div>
-        <details class="card disclosure">
-          <summary>Full analysis</summary>
-          <p id="analysisStatus" class="status" role="status" aria-live="polite"></p>
-          <div id="aiOutput" class="analysis-output">
-            <span class="muted">Save a few notes, then choose “Analyze Entire Inbox with AI”. Saved analysis reloads on refresh and is marked out of date when the inbox changes.</span>
+        <h2>Needs sorting <span id="trayCount" class="muted"></span></h2>
+        <div id="trayList"></div>
+
+        <details class="ai-details">
+          <summary>AI analysis details</summary>
+          <div id="aiOutput" class="panel">
+            <span class="muted">Save a few notes, then click “Analyze Entire Inbox with AI”. Saved analysis reloads on refresh and is marked stale if the inbox changes.</span>
           </div>
         </details>
       </section>
 
-      <section id="tasks-section" class="section">
-        <div class="section-head with-control">
+      <!-- TASKS -->
+      <section id="view-tasks" class="view" data-view="tasks" aria-labelledby="tasksHeading" hidden>
+        <header class="view-header">
           <div>
-            <h2>Tasks</h2>
-            <p class="sub">Things to do, pulled from your notes.</p>
+            <h1 id="tasksHeading">Tasks</h1>
+            <p class="sub">Every open task. Finished tasks appear in the Calendar and in search; deleted ones wait in Backlog.</p>
           </div>
           <div class="task-toolbar">
-            <label for="taskStatusFilter" class="visually-hidden">Show</label>
+            <label for="taskStatusFilter">Show</label>
             <select id="taskStatusFilter" onchange="changeTaskStatusFilter()">
               <option value="open">Open</option>
-              <option value="completed">Completed</option>
-              <option value="dismissed">Dismissed</option>
+              <option value="backlog">Backlog (bin)</option>
             </select>
           </div>
-        </div>
-        <p id="taskStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="tasks" class="stack"></div>
-      </section>
-
-      <section id="topics-section" class="section">
-        <div class="section-head">
-          <h2>Topics</h2>
-          <p class="sub">Spaces that group related items. Add your own.</p>
-        </div>
-        <form id="topicForm" class="topic-form" onsubmit="createTopic(event)">
-          <input id="topicName" maxlength="80" aria-label="New topic" placeholder="New topic, e.g. Home projects" required />
-          <button type="submit" class="secondary">Add Topic</button>
+        </header>
+        <p id="taskStatus" class="status muted" role="status" aria-live="polite"></p>
+        <form id="quickTaskForm" class="quick-task" autocomplete="off">
+          <button type="button" id="quickMic" class="mic-btn" aria-label="Speak a task" title="Speak a task">🎤</button>
+          <input id="quickTaskInput" type="text" maxlength="500" placeholder="Say or type: “Call the dentist Friday, high priority”" aria-label="New task">
+          <button type="submit" id="quickAdd">Add</button>
         </form>
-        <p id="topicStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="topics" class="topic-grid"></div>
-      </section>
-
-      <section id="inbox" class="section">
-        <div class="section-head">
-          <h2>Inbox</h2>
-          <p class="sub">Everything you have saved, with search and filters.</p>
+        <div id="taskDrops" class="task-drops" hidden>
+          <div class="lane-row" id="priorityLanes" aria-label="Drop a task on a priority">
+            <div class="lane lane-high" data-priority="High">High · 30 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
+            <div class="lane lane-medium" data-priority="Medium">Medium · 20 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
+            <div class="lane lane-low" data-priority="Low">Low · 10 <svg class="coin" role="img" aria-label="coins"><use href="#coin"/></svg></div>
+          </div>
+          <div class="day-row" id="dayStrip" aria-label="Drop a task on a day to set its deadline"></div>
         </div>
-        <form id="itemSearchForm" class="card search-toolbar" onsubmit="applyItemFilters(event)">
-          <input id="itemSearch" type="search" maxlength="200" aria-label="Search inbox" placeholder="Search text or titles" />
-          <div class="filters">
-            <label class="mini-field">
-              <span>Type</span>
-              <select id="itemTypeFilter">
-                <option value="">All</option>
-                <option value="text">Text</option>
-                <option value="url">Link</option>
-                <option value="pdf">PDF</option>
-                <option value="image">Image</option>
-                <option value="voice">Voice</option>
-              </select>
-            </label>
-            <label class="mini-field">
-              <span>Category</span>
-              <select id="categoryFilter">
-                <option value="">All</option>
-              </select>
-            </label>
-            <label class="mini-field">
-              <span>Priority</span>
-              <select id="priorityFilter">
-                <option value="">All</option>
-                <option value="High">High</option>
-                <option value="Medium">Medium</option>
-                <option value="Low">Low</option>
-              </select>
-            </label>
-            <label class="mini-field">
-              <span>Status</span>
-              <select id="processingStatusFilter">
-                <option value="">All</option>
-                <option value="ready">Ready</option>
-                <option value="processing">Processing</option>
-                <option value="failed">Failed</option>
-              </select>
-            </label>
-          </div>
-          <div class="search-actions">
-            <button type="submit">Search</button>
-            <button type="button" class="secondary" onclick="clearItemFilters()">Clear</button>
-          </div>
-        </form>
-        <p id="searchStatus" class="status" role="status" aria-live="polite"></p>
-        <div id="notes" class="stack"></div>
+        <div id="tasksList"></div>
+
+        <h2>Calendar export</h2>
+        <p id="calendarStatus" class="status muted" role="status" aria-live="polite"></p>
+        <div id="calendarPreview" class="panel">
+          <span class="muted">Calendar previews require confirmation and never write to Google without owner approval.</span>
+        </div>
       </section>
 
-      <footer class="footer">
-        <p>Life Inbox keeps your originals. AI suggestions are labelled, and your edits always win.</p>
-      </footer>
+      <!-- CALENDAR -->
+      <section id="view-calendar" class="view calendar-section" data-view="calendar" aria-labelledby="calendarHeading" hidden>
+        <header class="view-header calendar-heading">
+          <div>
+            <h1 id="calendarHeading">Calendar</h1>
+            <p class="sub">Dates from your inbox appear here immediately. Task dates replace their source note after organization.</p>
+          </div>
+          <div class="calendar-actions">
+            <button type="button" class="secondary" onclick="moveCalendar(-1)">Previous</button>
+            <button type="button" class="secondary" onclick="goToCalendarToday()">Today</button>
+            <button type="button" class="secondary" onclick="moveCalendar(1)">Next</button>
+          </div>
+        </header>
+        <div class="card gcal-card">
+          <div>
+            <strong>Google Calendar</strong>
+            <p id="gcalLine" class="sub">Checking connection…</p>
+          </div>
+          <div class="gcal-actions">
+            <a class="button-link" id="gcalExport" href="/api/calendar/export.ics" download>Download deadlines (.ics)</a>
+            <a class="button-link secondary" href="https://calendar.google.com/calendar" target="_blank" rel="noopener">Open Google Calendar</a>
+          </div>
+          <div class="busy-import">
+            <strong>Free-time suggestions</strong>
+            <p id="busyLine" class="sub">Import your calendar so “Find time” avoids your meetings.</p>
+            <p class="sub">In Google Calendar: Settings → Import &amp; export → Export, then pick the unzipped .ics file here.</p>
+            <label class="button-link secondary busy-file">
+              Import calendar (.ics)
+              <input type="file" id="busyFile" accept=".ics,text/calendar" hidden>
+            </label>
+            <button type="button" id="busyClear" class="ghost" hidden>Clear imported calendar</button>
+          </div>
+        </div>
+        <p id="calendarScheduleStatus" class="status muted" role="status" aria-live="polite"></p>
+        <div id="binZone" class="bin-zone" aria-label="Drop finished tasks here to move them to the bin">
+          <span class="bin-icon" aria-hidden="true">🗑️</span>
+          <span>Drag a finished task (✓) from the calendar here. It leaves the calendar but stays in Tasks → Backlog with its coins.</span>
+        </div>
+        <h3 id="calendarTitle"></h3>
+        <div class="calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </section>
+
+      <!-- ASK -->
+      <section id="view-ask" class="view" data-view="ask" aria-labelledby="askHeading" hidden>
+        <header class="view-header">
+          <div>
+            <h1 id="askHeading">Ask my inbox</h1>
+            <p class="sub">Search and ask questions grounded in your saved notes, URLs, and PDFs.</p>
+          </div>
+        </header>
+        <form id="askForm" class="ask-form card" onsubmit="askInbox(event)">
+          <label>
+            Question
+            <input id="askQuestion" type="search" maxlength="500" placeholder="What did I plan about car insurance?" required />
+          </label>
+          <div class="ask-examples">
+            <button type="button" class="secondary" onclick="fillAskExample('What deadlines or renewals did I mention?')">Renewals</button>
+            <button type="button" class="secondary" onclick="fillAskExample('What books or articles should I read?')">Reading list</button>
+            <button type="button" class="secondary" onclick="fillAskExample('What restaurant recommendations do I have?')">Restaurants</button>
+          </div>
+          <button type="submit" id="askButton">Ask</button>
+        </form>
+        <p id="askStatus" class="status muted" role="status" aria-live="polite"></p>
+        <div id="askOutput" class="panel ask-output">
+          <span class="muted">Answers cite inbox items. If evidence is weak, Life Inbox says so instead of guessing.</span>
+        </div>
+      </section>
+
+      <!-- SECTIONS -->
+      <section id="view-sections" class="view" data-view="sections" aria-labelledby="sectionsHeading" hidden>
+        <header class="view-header">
+          <div>
+            <h1 id="sectionsHeading">Sections</h1>
+            <p class="sub">Every task and item, sorted by domain. Open a section to act on its tasks. Drag a task or item onto another section to move it.</p>
+          </div>
+        </header>
+        <div class="sort-toolbar">
+          <div class="chip-row" role="group" aria-label="Group by">
+            <button type="button" class="chip" data-section-group="domain" onclick="setSectionGroup('domain')">By domain</button>
+            <button type="button" class="chip" data-section-group="format" onclick="setSectionGroup('format')">By format</button>
+          </div>
+          <div id="sortChips" class="chip-row" role="group" aria-label="Filter items by format"></div>
+        </div>
+        <div id="sectionsList"></div>
+      </section>
+
+    </main>
+    <canvas id="confettiCanvas" class="confetti-canvas" aria-hidden="true"></canvas>
+    <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
+      <div class="drop-overlay-box">
+        <strong>Drop to save</strong>
+        <span>PDFs, images, audio, text/CSV/JSON files, links or text. Each is sorted by format and domain.</span>
+      </div>
     </div>
-  </main>
+  </div>
 
+  <dialog id="shopDialog" class="shop-dialog" aria-labelledby="shopHeading">
+    <header class="shop-header">
+      <div>
+        <h2 id="shopHeading">Pet shop</h2>
+        <p class="sub">Spend the coins you earn on a companion. Spending never lowers your daily progress, streak or level.</p>
+      </div>
+      <button type="button" id="shopClose" class="ghost" aria-label="Close shop">×</button>
+    </header>
+    <p id="shopDialogBalance" class="shop-balance"></p>
+    <div id="petGrid" class="pet-grid"></div>
+    <div class="pet-settings">
+      <label>Pet name <input id="petName" maxlength="24" placeholder="Name your pet"></label>
+      <label class="check"><input type="checkbox" id="petInPage"> Show my pet roaming on this page</label>
+      <p class="muted">For a pet that walks across your whole screen, run the <a href="/pet" target="_blank" rel="noopener">desktop companion</a> (see <code>desktop-pet/README.md</code>).</p>
+    </div>
+  </dialog>
+
+  <dialog id="shortcutsDialog" class="shortcuts-dialog" aria-labelledby="shortcutsHeading">
+    <div class="shortcuts-header">
+      <h2 id="shortcutsHeading">Keyboard shortcuts</h2>
+      <button type="button" class="ghost" onclick="document.getElementById('shortcutsDialog').close()" aria-label="Close">×</button>
+    </div>
+    <dl class="shortcuts-list">
+      <div><dt><kbd>N</kbd></dt><dd>New note</dd></div>
+      <div><dt><kbd>B</kbd></dt><dd>Read today's briefing aloud</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>Search everything</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>H</kbd></dt><dd>Go to Today</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>I</kbd></dt><dd>Go to Inbox</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>T</kbd></dt><dd>Go to Tasks</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>C</kbd></dt><dd>Go to Calendar</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>A</kbd></dt><dd>Go to Ask</dd></div>
+      <div><dt><kbd>G</kbd> <kbd>S</kbd></dt><dd>Go to Sections</dd></div>
+      <div><dt><kbd>Ctrl</kbd> <kbd>Enter</kbd></dt><dd>Save capture</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Show this list</dd></div>
+      <div><dt><kbd>Esc</kbd></dt><dd>Close / leave a box</dd></div>
+    </dl>
+  </dialog>
+
+  <!-- Short confirmations ("Task completed · Undo") appear here. -->
+  <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
+
+  <div id="petLayer" class="pet-layer" aria-live="polite"></div>
   <dialog id="settingsDialog" class="sheet" aria-labelledby="settingsTitle">
     <div class="sheet-head">
       <h2 id="settingsTitle">Settings</h2>
@@ -325,7 +467,7 @@
         <h3 id="aiSettingsTitle">AI provider</h3>
         <span id="aiActive" class="badge">Built-in rules</span>
       </div>
-      <p class="sub">Use your own key with Claude, ChatGPT, Gemini or an open-source model. It powers “Analyze” and “Ask My Inbox”. Your key is encrypted and never shown again.</p>
+      <p class="sub">Use your own key with Claude, ChatGPT, Gemini or an open-source model. It powers “Analyze” and “Ask”. Your key is encrypted and never shown again.</p>
       <form id="aiSettingsForm" class="settings-form" onsubmit="saveAiSettings(event)">
         <label class="field">
           <span>Provider</span>
@@ -358,7 +500,7 @@
         <h3 id="calendarSettingsTitle">Google Calendar</h3>
         <span id="calendarBadge" class="badge">Not connected</span>
       </div>
-      <p class="sub">Connect your Google account to add dated tasks to your calendar. Life Inbox can only add events, and only after you confirm each one.</p>
+      <p class="sub">Connect your Google account to add dated tasks straight to your calendar. Life Inbox can only add events, and only after you confirm each one.</p>
       <div class="settings-actions">
         <a id="calendarConnect" class="button-link" href="/api/integrations/google-calendar/connect">Connect Google Calendar</a>
         <button type="button" id="calendarDisconnect" class="secondary" onclick="disconnectCalendar()" hidden>Disconnect</button>
@@ -367,7 +509,7 @@
     </section>
   </dialog>
 
-  <script src="/static/pagination_state.js"></script>
+  <script src="/static/pet.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

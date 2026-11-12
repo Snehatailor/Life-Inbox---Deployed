@@ -4,9 +4,15 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def head_revision() -> str:
+    """The latest migration, so new migrations don't break these tests."""
+    return ScriptDirectory.from_config(alembic_config(Path("unused.db"))).get_current_head()
 
 
 def alembic_config(database_path: Path) -> Config:
@@ -55,6 +61,8 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
             "storage_path",
             "extracted_text",
             "ai_description",
+            "domain",
+            "domain_source",
             "owner_user_id",
             "created_at",
             "updated_at",
@@ -108,9 +116,19 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
             "status",
             "dedup_key",
             "owner_user_id",
+            "completed_at",
+            "points_awarded",
+            "binned_at",
+            "domain",
+            "domain_source",
+            "priority_source",
+            "slot_start",
+            "slot_end",
+            "slot_set_at",
             "created_at",
             "updated_at",
         }
+        assert "point_events" in set(inspector.get_table_names())
         assert "calendar_action_receipts" in set(inspector.get_table_names())
         assert {
             column["name"] for column in inspector.get_columns("topics")
@@ -132,7 +150,7 @@ def test_upgrade_creates_inbox_items_in_empty_database(tmp_path, monkeypatch):
                 text("SELECT version_num FROM alembic_version")
             )
             topic_count = connection.scalar(text("SELECT COUNT(*) FROM topics"))
-        assert revision == "0014_user_settings"
+        assert revision == head_revision()
         assert topic_count >= 9
     finally:
         engine.dispose()
@@ -233,7 +251,7 @@ def test_upgrade_adopts_legacy_database_without_changing_notes(
             for note_id, note_text, created_at in existing_notes
         ]
         assert next_id == 10
-        assert revision == "0014_user_settings"
+        assert revision == head_revision()
     finally:
         engine.dispose()
 
@@ -319,7 +337,7 @@ def test_upgrade_consolidates_tasks_that_share_a_source(tmp_path, monkeypatch):
             )
         ]
         assert [tuple(link) for link in links] == [(1, 1)]
-        assert revision == "0014_user_settings"
+        assert revision == head_revision()
 
         # Milestone 2 drops the one-task-per-source unique index so one
         # inbox item may source multiple durable tasks.
@@ -451,7 +469,7 @@ def test_topic_uniqueness_is_per_owner_and_keeps_existing_rows(
         assert "UNIQUE (name)" not in create_sql
         assert [tuple(row) for row in migrated] == [tuple(row) for row in before]
         assert sequence >= max(row.id for row in before)
-        assert revision == "0014_user_settings"
+        assert revision == head_revision()
 
         with engine.begin() as connection:
             connection.execute(

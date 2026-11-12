@@ -5,3 +5,6 @@ __pycache__/
 data/*.db
 data/uploads/
 .DS_Store
+
+# Desktop pet on/off switch (per computer)
+data/desktop_pet.json

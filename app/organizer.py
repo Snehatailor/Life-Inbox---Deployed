@@ -77,19 +77,12 @@ def _tags_for_text(text: str) -> list[str]:
 
 
 def _extract_timing(text: str) -> str | None:
-    lowered = text.lower()
-    for phrase in (
-        "today",
-        "tomorrow",
-        "this weekend",
-        "this week",
-        "next week",
-        "before friday",
-        "before thursday",
-    ):
-        if phrase in lowered:
-            return phrase
-    return None
+    # Keep the exact phrase for the task, then normalize it in the attention
+    # layer.  This covers explicit dates ("Oct 18" / "October 18") as well
+    # as relative phrases while remaining deterministic without an API key.
+    from app.attention.dates import timing_phrase_from_text
+
+    return timing_phrase_from_text(text)
 
 
 def _split_action_tasks(text: str, note_id: int, priority: str) -> list[dict]:
@@ -99,10 +92,20 @@ def _split_action_tasks(text: str, note_id: int, priority: str) -> list[dict]:
         "pick up", "prepare", "renew", "follow up", "need to", "remember to",
         "research", "look into", "order",
     ]
+    action_pattern = "|".join(
+        sorted((re.escape(marker) for marker in action_markers), key=len, reverse=True)
+    )
+    # Bullets, new lines, semicolons and a comma/"and" before another action
+    # are common ways of pasting many tasks into one capture.  Only split on
+    # commas when another known action follows, so ordinary prose stays intact.
     chunks = [
-        part.strip()
-        for part in re.split(r"[.!?\n]+", text)
-        if part and part.strip()
+        part.strip(" -•\t")
+        for part in re.split(
+            rf"(?:[.!?;\n]+|,\s*(?=(?:and\s+)?(?:{action_pattern})\b)|\s+and\s+(?=(?:{action_pattern})\b))",
+            text,
+            flags=re.I,
+        )
+        if part and part.strip(" -•\t")
     ]
     todos = []
     for chunk in chunks:
