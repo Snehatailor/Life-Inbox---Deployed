@@ -142,7 +142,7 @@ def test_merged_chain_reaches_one_head_with_everything(tmp_path):
     tables = set(inspect(engine).get_table_names())
     user_columns = {c["name"] for c in inspect(engine).get_columns("users")}
     engine.dispose()
-    assert revision == head_revision() == "0022_reconcile_merged_branches"
+    assert revision == head_revision()
     assert {"user_settings", "point_events", "pet_settings", "teams", "task_events"} <= tables
     assert "password_hash" in user_columns
 

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <title>Life Inbox</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2026-11-12d" />
-  <link rel="stylesheet" href="/static/pet.css?v=2026-11-12d" />
+  <link rel="stylesheet" href="/static/styles.css?v=2026-11-12e" />
+  <link rel="stylesheet" href="/static/pet.css?v=2026-11-12e" />
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -147,6 +147,10 @@
             <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
           </button>
           <p id="desktopPetStatus" class="status muted" role="status" aria-live="polite"></p>
+          <button id="getPetButton" type="button" class="ghost account-item" onclick="openWelcome(true)" hidden>
+            <span aria-hidden="true">⬇️</span>
+            <span>Get the desktop pet</span>
+          </button>
           <button id="signOutButton" type="button" class="ghost account-item" onclick="logoutSession()" hidden>
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
             <span>Sign out</span>
@@ -507,9 +511,57 @@
       </div>
       <p id="calendarSettingsStatus" class="status" role="status" aria-live="polite"></p>
     </section>
+    <section class="sheet-section" aria-labelledby="demoSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="demoSettingsTitle">Demo data</h3>
+        <span id="demoBadge" class="badge">Not loaded</span>
+      </div>
+      <p class="sub">Fill your account with samples for every feature: notes, a link, PDF, image and voice note, tasks due today, overdue and upcoming, points and a streak, a pet, a team, busy times and a topic. Removing it deletes only the samples.</p>
+      <div class="settings-actions">
+        <button type="button" id="demoLoadButton" onclick="loadDemoData()">Load demo data</button>
+        <button type="button" id="demoRemoveButton" class="secondary" onclick="removeDemoData()" hidden>Remove demo data</button>
+      </div>
+      <p id="demoStatus" class="status" role="status" aria-live="polite"></p>
+    </section>
   </dialog>
 
-  <script src="/static/pet.js?v=2026-11-12d"></script>
-  <script src="/static/app.js?v=2026-11-12d"></script>
+  <dialog id="welcomeDialog" class="sheet welcome-sheet" aria-labelledby="welcomeTitle">
+    <div class="sheet-head">
+      <h2 id="welcomeTitle">Welcome to Life Inbox</h2>
+      <button type="button" class="secondary small" onclick="closeWelcome()">Not now</button>
+    </div>
+    <section id="welcomePet" class="sheet-section welcome-card" hidden>
+      <div class="welcome-art" aria-hidden="true">🐾</div>
+      <div>
+        <h3>Meet your desktop pet</h3>
+        <p class="sub">A little companion that lives on your screen, starts with your computer, takes quick notes and reminds you of tasks, even when this tab is closed.</p>
+        <div class="settings-actions">
+          <a id="petDownloadPrimary" class="button-link" href="#" rel="noopener">Download</a>
+          <span id="petDownloadHint" class="hint"></span>
+        </div>
+        <p class="hint welcome-others">Other systems:
+          <a id="petDlWinX64" href="#" rel="noopener">Windows</a> ·
+          <a id="petDlWinArm" href="#" rel="noopener">Windows (ARM)</a> ·
+          <a id="petDlMac" href="#" rel="noopener">Mac</a> ·
+          <a id="petDlLinux" href="#" rel="noopener">Linux</a>
+        </p>
+        <p class="hint">After installing, tap the pet and sign in with the same email and password.</p>
+      </div>
+    </section>
+    <section id="welcomeDemo" class="sheet-section welcome-card" hidden>
+      <div class="welcome-art" aria-hidden="true">✨</div>
+      <div>
+        <h3>Try it with demo data</h3>
+        <p class="sub">See every feature in action with sample notes, tasks, points and a streak. You can remove it any time in Settings.</p>
+        <div class="settings-actions">
+          <button type="button" id="welcomeDemoButton" onclick="loadDemoData(true)">Load demo data</button>
+        </div>
+        <p id="welcomeDemoStatus" class="status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+  </dialog>
+
+  <script src="/static/pet.js?v=2026-11-12e"></script>
+  <script src="/static/app.js?v=2026-11-12e"></script>
 </body>
 </html>

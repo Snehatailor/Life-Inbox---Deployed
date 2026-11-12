@@ -93,6 +93,7 @@
   let quipTimer = 0;
   let dragging = false;
   let panelOpen = false;
+  let signedOut = false;
   let bubbleTimer = 0;
   let lastCoins = null;
   let audioCtx = null;
@@ -211,6 +212,16 @@
         </div>
         <p class="pp-status" role="status"></p>
       </div>
+      <form class="pp-tab pp-signin" data-pane="signin" hidden>
+        <p class="pp-signin-lede">Sign in with your Life Inbox account so I can save notes and remind you.</p>
+        <input class="pp-email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email" required>
+        <input class="pp-password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required>
+        <div class="pp-row">
+          <button type="submit" class="pp-signin-go">Sign in</button>
+          <button type="button" class="pp-signup secondary">Create account</button>
+        </div>
+        <p class="pp-signin-status" role="status"></p>
+      </form>
       <div class="pp-tab" data-pane="today" hidden>
         <div class="pp-list"></div>
         <button type="button" class="pp-open secondary">Open Life Inbox</button>
@@ -222,6 +233,11 @@
     panel.querySelector('.pp-save').addEventListener('click', () => saveText('note'));
     panel.querySelector('.pp-task').addEventListener('click', () => saveText('task'));
     panel.querySelector('.pp-open').addEventListener('click', openApp);
+    panel.querySelector('.pp-signin').addEventListener('submit', event => {
+      event.preventDefault();
+      signIn();
+    });
+    panel.querySelector('.pp-signup').addEventListener('click', openApp);
     panel.querySelector('.pp-text').addEventListener('input', event => {
       const reminder = mentionsReminderTime(event.target.value);
       panel.querySelector('.pp-task').classList.toggle('secondary', !reminder);
@@ -247,6 +263,35 @@
       });
     }
     return panel;
+  }
+
+  async function signIn() {
+    const email = els.panel.querySelector('.pp-email').value.trim();
+    const password = els.panel.querySelector('.pp-password').value;
+    const line = els.panel.querySelector('.pp-signin-status');
+    if (!email || !password) { line.textContent = 'Enter your email and password.'; return; }
+    line.textContent = 'Signing in…';
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email, password})
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        line.textContent = typeof data.detail === 'string' ? data.detail : 'Sign-in failed.';
+        return;
+      }
+      els.panel.querySelector('.pp-password').value = '';
+      line.textContent = '';
+      signedOut = false;
+      els.panel.querySelector('.pp-tabs').hidden = false;
+      showTab('note');
+      say('Signed in! Tap me any time. 🐾', 4000);
+      poll();
+    } catch {
+      line.textContent = 'Could not reach Life Inbox. Check your internet connection.';
+    }
   }
 
   function showTab(name) {
@@ -298,9 +343,16 @@
     panelOpen = open;
     els.panel.hidden = !open;
     if (open) {
-      renderToday();
-      placePanel();
-      showTab('note');
+      els.panel.querySelector('.pp-tabs').hidden = signedOut;
+      if (signedOut) {
+        showTab('signin');
+        placePanel();
+        els.panel.querySelector('.pp-email').focus();
+      } else {
+        renderToday();
+        placePanel();
+        showTab('note');
+      }
     }
     els.wrap.classList.toggle('pet-panel-open', open);
     if (!open) setTimeout(showNextAlert, 300);
@@ -601,8 +653,19 @@
   async function poll() {
     try {
       applyState(await call('/api/pet/state'));
+      signedOut = false;
     } catch (error) {
-      if (error.status === 401 && els.bubble) say('Sign in to Life Inbox so I can help.', 8000);
+      if (error.status === 401) {
+        const firstTime = !signedOut;
+        signedOut = true;
+        if (!state && els.body) {
+          // Nothing loaded yet: show the starter pet so there is something to tap.
+          els.body.textContent = '🐱';
+          els.label.textContent = 'Tap to sign in';
+          els.panel.querySelector('.pp-title').textContent = '🐱 Life Inbox Pet';
+        }
+        if (firstTime && els.bubble && !panelOpen) say('Tap me to sign in to Life Inbox. 🐾', 9000);
+      }
     }
   }
 

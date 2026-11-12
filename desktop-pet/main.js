@@ -5,10 +5,25 @@
 // except over the pet (the page tells us when the pointer is over it), so you
 // can keep working underneath.
 
+const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, screen, shell, nativeImage } = require('electron');
 
-const BASE_URL = (process.env.LIFE_INBOX_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+// Which Life Inbox to talk to: the server that launched us (LIFE_INBOX_URL),
+// else the site this download was built for (config.json), else a local run.
+function configuredUrl() {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+    return typeof config.url === 'string' ? config.url : '';
+  } catch {
+    return '';
+  }
+}
+
+const BASE_URL = (process.env.LIFE_INBOX_URL || configuredUrl() || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+// Installed copies (not ones a local server starts) stay in your system: they
+// start when you log in, which you can switch off from the tray menu.
+const MANAGES_LOGIN_ITEM = app.isPackaged && !process.env.LIFE_INBOX_URL;
 const SELF_TEST = process.env.PET_SELF_TEST === '1';
 const RETRY_MS = 5000;
 
@@ -93,6 +108,24 @@ function createWindow() {
   win.loadURL(`${BASE_URL}/pet`);
 }
 
+function firstRunSetup() {
+  if (!MANAGES_LOGIN_ITEM) return;
+  const marker = path.join(app.getPath('userData'), 'first-run-done');
+  if (fs.existsSync(marker)) return;
+  app.setLoginItemSettings({ openAtLogin: true });
+  try { fs.writeFileSync(marker, new Date().toISOString()); } catch { /* ignore */ }
+}
+
+function startAtLoginItem() {
+  if (!MANAGES_LOGIN_ITEM) return [];
+  return [{
+    label: 'Start when I log in',
+    type: 'checkbox',
+    checked: app.getLoginItemSettings().openAtLogin,
+    click: item => app.setLoginItemSettings({ openAtLogin: item.checked })
+  }];
+}
+
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
@@ -108,6 +141,7 @@ function createTray() {
       { label: 'Show / hide pet', click: toggle },
       { label: 'Open Life Inbox', click: () => shell.openExternal(`${BASE_URL}/`) },
       { label: 'Reload pet', click: () => win && win.loadURL(`${BASE_URL}/pet`) },
+      ...startAtLoginItem(),
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ])
@@ -141,6 +175,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    firstRunSetup();
     if (!SELF_TEST) createTray();
     createWindow();
     screen.on('display-metrics-changed', () => {

@@ -2590,7 +2590,10 @@ syncControlsFromUrl();
 loadAuthConfig().then(loadAuthUser).then(user => {
   if (user) {
     handleSettingsRedirect();
-    loadDesktopPet();
+    loadDesktopPet().then(() => {
+      renderGetPetButton();
+      if (!location.search.includes('calendar=')) openWelcome(false);
+    });
   } else {
     showRedirectAuthError();
   }
@@ -3402,6 +3405,7 @@ async function loadSettings() {
   settingsState = await requestJson('/api/settings');
   renderAiSettings();
   renderCalendarSettings();
+  refreshDemoStatus();
 }
 
 async function openSettings() {
@@ -3554,4 +3558,132 @@ async function toggleDesktopPet() {
     toggle.disabled = false;
     renderDesktopPet();
   }
+}
+
+// ---------- Demo data ----------
+
+async function refreshDemoStatus() {
+  try {
+    const status = await requestJson('/api/demo');
+    const badge = document.getElementById('demoBadge');
+    badge.textContent = status.loaded ? 'Loaded' : 'Not loaded';
+    badge.classList.toggle('on', status.loaded);
+    document.getElementById('demoLoadButton').hidden = status.loaded;
+    document.getElementById('demoRemoveButton').hidden = !status.loaded;
+    return status;
+  } catch {
+    return null;
+  }
+}
+
+async function loadDemoData(fromWelcome = false) {
+  const statusId = fromWelcome ? 'welcomeDemoStatus' : 'demoStatus';
+  const buttonId = fromWelcome ? 'welcomeDemoButton' : 'demoLoadButton';
+  setButtonBusy(buttonId, true, 'Loading…', 'Load demo data');
+  setStatus(statusId, 'Adding samples for every feature…');
+  try {
+    await requestJson('/api/demo', {method: 'POST'});
+    setStatus(statusId, 'Demo data loaded. Refreshing…');
+    rememberWelcomeSeen();
+    setTimeout(() => location.reload(), 600);
+  } catch (error) {
+    setStatus(statusId, error.message, true);
+    setButtonBusy(buttonId, false, 'Loading…', 'Load demo data');
+  }
+}
+
+async function removeDemoData() {
+  setButtonBusy('demoRemoveButton', true, 'Removing…', 'Remove demo data');
+  try {
+    await requestJson('/api/demo', {method: 'DELETE'});
+    setStatus('demoStatus', 'Demo data removed. Refreshing…');
+    setTimeout(() => location.reload(), 600);
+  } catch (error) {
+    setStatus('demoStatus', error.message, true);
+    setButtonBusy('demoRemoveButton', false, 'Removing…', 'Remove demo data');
+  }
+}
+
+// ---------- Welcome popup: desktop pet download + demo data ----------
+
+const PET_RELEASES = 'https://github.com/Snehatailor/life-inbox-pet/releases/latest/download/';
+const PET_FILES = {
+  winX64: 'Life-Inbox-Pet-Setup-x64.exe',
+  winArm: 'Life-Inbox-Pet-Setup-arm64.exe',
+  mac: 'Life-Inbox-Pet-mac.dmg',
+  linux: 'Life-Inbox-Pet-linux-x86_64.AppImage'
+};
+
+async function detectPetDownload() {
+  const ua = navigator.userAgent || '';
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) return {key: 'mac', label: 'Download for Mac'};
+  if (/Linux/i.test(platform) && !/Android/i.test(ua)) return {key: 'linux', label: 'Download for Linux'};
+  if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+    let arm = false;
+    try {
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        const values = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+        arm = values.architecture === 'arm';
+      }
+    } catch { /* keep x64 */ }
+    return arm
+      ? {key: 'winArm', label: 'Download for Windows (ARM)'}
+      : {key: 'winX64', label: 'Download for Windows'};
+  }
+  return null;
+}
+
+function welcomeKey() {
+  return `lifeInbox.welcomeSeen.${currentUser ? currentUser.id : 'anon'}`;
+}
+
+function rememberWelcomeSeen() {
+  try { localStorage.setItem(welcomeKey(), '1'); } catch { /* private mode */ }
+}
+
+function welcomeAlreadySeen() {
+  try { return localStorage.getItem(welcomeKey()) === '1'; } catch { return false; }
+}
+
+async function openWelcome(force = false) {
+  const menu = document.querySelector('details.account');
+  if (menu) menu.open = false;
+  const hosted = !(desktopPetState && desktopPetState.available);
+  const demo = await refreshDemoStatus();
+  let inboxEmpty = false;
+  try { inboxEmpty = (await requestJson('/api/items')).length === 0; } catch { /* ignore */ }
+  const showDemo = Boolean(demo && !demo.loaded && (inboxEmpty || force));
+  document.getElementById('welcomePet').hidden = !hosted;
+  document.getElementById('welcomeDemo').hidden = !showDemo;
+  if (!hosted && !showDemo) return;
+  if (!force && welcomeAlreadySeen()) return;
+
+  for (const [id, key] of [['petDlWinX64', 'winX64'], ['petDlWinArm', 'winArm'], ['petDlMac', 'mac'], ['petDlLinux', 'linux']]) {
+    document.getElementById(id).href = PET_RELEASES + PET_FILES[key];
+  }
+  const primary = document.getElementById('petDownloadPrimary');
+  const detected = await detectPetDownload();
+  if (detected) {
+    primary.href = PET_RELEASES + PET_FILES[detected.key];
+    primary.textContent = detected.label;
+    primary.hidden = false;
+    document.getElementById('petDownloadHint').textContent = '';
+  } else {
+    primary.hidden = true;
+    document.getElementById('petDownloadHint').textContent = 'The desktop pet runs on Windows, Mac and Linux computers.';
+  }
+  primary.onclick = rememberWelcomeSeen;
+  const dialog = document.getElementById('welcomeDialog');
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeWelcome() {
+  rememberWelcomeSeen();
+  document.getElementById('welcomeDialog').close();
+}
+
+function renderGetPetButton() {
+  const hosted = !(desktopPetState && desktopPetState.available);
+  document.getElementById('getPetButton').hidden = !hosted;
 }
