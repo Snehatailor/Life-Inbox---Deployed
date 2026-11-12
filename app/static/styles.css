@@ -931,3 +931,11 @@ button.danger-link { color: var(--danger); margin-left: auto; }
 /* Messages inside the account menu stay inside it (the narrow-screen rule above floats .status). */
 .account .account-menu .status, .account[open] .account-menu .status { position: static; width: auto; margin: 4px 10px 6px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-width: 767px) { .account[open] .account-menu { width: min(280px, calc(100vw - 32px)); } }
+
+/* ---------- Welcome popup ---------- */
+.welcome-card { display: grid; grid-template-columns: 56px 1fr; gap: 14px; align-items: start; }
+.welcome-card h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.welcome-card .sub { margin: 0 0 12px; color: var(--muted); }
+.welcome-art { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 28px; background: var(--accent-soft); }
+.welcome-others { margin-top: 10px; }
+.welcome-others a { color: var(--accent-text); }

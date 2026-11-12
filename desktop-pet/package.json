@@ -1,13 +1,78 @@
 {
   "name": "life-inbox-pet",
-  "version": "0.1.0",
+  "productName": "Life Inbox Pet",
+  "version": "1.0.0",
   "description": "Desktop companion for Life Inbox: your pet roams your screen, takes notes and reminds you of tasks.",
+  "author": "Life Inbox",
+  "license": "MIT",
   "main": "main.js",
   "private": true,
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64 --publish never && electron-builder --win --arm64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.lifeinbox.pet",
+    "productName": "Life Inbox Pet",
+    "files": [
+      "main.js",
+      "preload.js",
+      "config.json",
+      "assets/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png",
+      "artifactName": "Life-Inbox-Pet-Setup-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Life Inbox Pet"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "identity": "-",
+      "artifactName": "Life-Inbox-Pet-mac.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "artifactName": "Life-Inbox-Pet-linux-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
+    }
   }
 }

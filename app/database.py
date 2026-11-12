@@ -289,6 +289,7 @@ class UserSettingsRecord(Base):
     ai_api_key_enc = Column(Text, nullable=True)
     google_calendar_token_enc = Column(Text, nullable=True)
     google_calendar_email = Column(Text, nullable=True)
+    demo_data_json = Column(Text, nullable=True)
     updated_at = Column(Text, nullable=False)
 
 
@@ -299,6 +300,7 @@ _SETTINGS_FIELDS = (
     "ai_api_key_enc",
     "google_calendar_token_enc",
     "google_calendar_email",
+    "demo_data_json",
 )
 
 

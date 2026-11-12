@@ -1292,6 +1292,30 @@ def _desktop_pet_allowed(request: Request) -> bool:
     return _is_local_environment() and client_host in _LOOPBACK_HOSTS
 
 
+@app.get("/api/demo")
+def demo_data_status():
+    from app.demo_data import demo_status
+
+    return demo_status(require_owner_id())
+
+
+@app.post("/api/demo")
+def demo_data_load():
+    from app.demo_data import DemoDataError, load_demo_data
+
+    try:
+        return load_demo_data(require_owner_id())
+    except DemoDataError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/demo")
+def demo_data_remove():
+    from app.demo_data import remove_demo_data
+
+    return remove_demo_data(require_owner_id())
+
+
 @app.get("/api/desktop-pet")
 def desktop_pet_status(request: Request):
     from app.pet_launcher import pet_status
