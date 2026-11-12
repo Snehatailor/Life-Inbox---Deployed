@@ -159,3 +159,36 @@ keep the files.
 - Object storage (S3) wiring
 - Public internet deployment is documented for Render above; nothing deploys automatically
 - Purchases or paid managed services
+
+## Settings: bring-your-own AI and Google Calendar
+
+The gear button in the top bar opens **Settings**.
+
+**AI provider.** Each user can pick Claude, ChatGPT, Gemini, OpenRouter,
+Groq, Ollama or any OpenAI-compatible server, with its base URL, model and
+API key. Claude is called through Anthropic's SDK; the others through the
+OpenAI SDK's Chat Completions at the given base URL. Keys are encrypted with
+Fernet (key from `LIFE_INBOX_ENCRYPTION_KEY`, or derived from
+`LIFE_INBOX_SESSION_SECRET`) and only a last-four hint is ever shown. On the
+hosted site, base URLs must be public `https://` addresses; Ollama on
+`localhost` only works when the app runs locally. A failed or refused AI call
+falls back to the built-in rules. A user's setting takes priority over the
+server's `OPENAI_API_KEY`.
+
+**Google Calendar.** Uses the same OAuth client as Google sign-in. In Google
+Cloud Console for that client:
+
+1. Enable the **Google Calendar API**.
+2. Add the authorized redirect URI
+   `https://<your-service>.onrender.com/api/integrations/google-calendar/callback`
+   (in addition to the sign-in callback).
+3. On the OAuth consent screen, add the scope
+   `https://www.googleapis.com/auth/calendar.events`. It is a sensitive
+   scope: while the app is in Testing, only listed test users can connect;
+   publishing for everyone requires Google's verification.
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the service. Users then
+choose **Connect Google Calendar**, and each dated task's calendar preview
+shows **Add to Google Calendar**; an all-day event is created only after that
+explicit confirm. Tokens are stored encrypted per user; **Disconnect**
+revokes them.

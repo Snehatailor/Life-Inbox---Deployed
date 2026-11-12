@@ -240,6 +240,62 @@ class TaskRecord(Base):
     updated_at = Column(Text, nullable=False)
 
 
+class UserSettingsRecord(Base):
+    """One row per user. Secret columns hold encrypted text only."""
+
+    __tablename__ = "user_settings"
+
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    ai_provider = Column(Text, nullable=True)
+    ai_base_url = Column(Text, nullable=True)
+    ai_model = Column(Text, nullable=True)
+    ai_api_key_enc = Column(Text, nullable=True)
+    google_calendar_token_enc = Column(Text, nullable=True)
+    google_calendar_email = Column(Text, nullable=True)
+    updated_at = Column(Text, nullable=False)
+
+
+_SETTINGS_FIELDS = (
+    "ai_provider",
+    "ai_base_url",
+    "ai_model",
+    "ai_api_key_enc",
+    "google_calendar_token_enc",
+    "google_calendar_email",
+)
+
+
+def get_user_settings(owner_user_id: int) -> dict:
+    """Raw settings for one user (secret columns still encrypted)."""
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            return {field: None for field in _SETTINGS_FIELDS}
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
+
+
+def update_user_settings(owner_user_id: int, **changes) -> dict:
+    """Set the given columns for one user; None clears a column."""
+    unknown = set(changes) - set(_SETTINGS_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown settings fields: {sorted(unknown)}")
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            row = UserSettingsRecord(
+                user_id=owner_user_id,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            session.add(row)
+        for field, value in changes.items():
+            setattr(row, field, value)
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
+
+
 class CalendarActionReceiptRecord(Base):
     __tablename__ = "calendar_action_receipts"
     __table_args__ = {"sqlite_autoincrement": True}

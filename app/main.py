@@ -71,6 +71,7 @@ from app.database import (
     update_note_in_db,
     update_topic_in_db,
 )
+from app.integrations.google_calendar import CalendarConnectionError
 from app.integrations.calendar import (
     CalendarWriteBlockedError,
     get_calendar_adapter,
@@ -1114,6 +1115,8 @@ def calendar_confirm(payload: CalendarConfirmRequest):
         confirmed = adapter.confirm_event(draft)
     except CalendarWriteBlockedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except CalendarConnectionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Calendar confirm failed")
         raise HTTPException(
@@ -1133,6 +1136,8 @@ def calendar_confirm(payload: CalendarConfirmRequest):
                 "end_date": confirmed.end_date,
                 "timezone": confirmed.timezone_name,
                 "notes": confirmed.notes,
+                "external_event_id": confirmed.external_event_id,
+                "external_link": confirmed.external_link,
             },
         )
     except ValueError as exc:
@@ -1144,8 +1149,225 @@ def calendar_confirm(payload: CalendarConfirmRequest):
         "status": confirmed.status,
         "provider": confirmed.provider,
         "notes": confirmed.notes,
+        "link": confirmed.external_link,
         "receipt": receipt,
     }
+
+
+# ---------- Settings: bring-your-own AI ----------
+
+def _ai_settings_view(owner_id: int) -> dict:
+    from app.ai_provider import PRESETS, resolve_ai_config
+    from app.database import get_user_settings
+    from app.secret_box import decrypt_secret, key_hint
+
+    settings = get_user_settings(owner_id)
+    provider = settings.get("ai_provider")
+    preset = PRESETS.get(provider or "", {})
+    active = resolve_ai_config()
+    return {
+        "provider": provider,
+        "base_url": settings.get("ai_base_url") or preset.get("base_url"),
+        "model": settings.get("ai_model") or preset.get("model"),
+        "has_key": bool(settings.get("ai_api_key_enc")),
+        "key_hint": key_hint(decrypt_secret(settings.get("ai_api_key_enc"))),
+        "active": (
+            {"source": active.source, "label": active.label, "model": active.model}
+            if active
+            else {"source": "none", "label": "Built-in rules (no AI)", "model": None}
+        ),
+    }
+
+
+@app.get("/api/settings")
+def get_settings():
+    from app.ai_provider import PRESETS
+    from app.integrations.google_calendar import connection_status
+
+    owner_id = require_owner_id()
+    return {
+        "ai": _ai_settings_view(owner_id),
+        "presets": [
+            {
+                "id": key,
+                "label": value["label"],
+                "base_url": value["base_url"],
+                "model": value["model"],
+                "needs_key": value["needs_key"],
+                "key_help": value["key_help"],
+            }
+            for key, value in PRESETS.items()
+        ],
+        "calendar": connection_status(owner_id),
+    }
+
+
+@app.put("/api/settings/ai")
+def save_ai_settings(payload: dict):
+    from app.ai_provider import PRESETS, validate_base_url
+    from app.database import get_user_settings, update_user_settings
+    from app.secret_box import encrypt_secret
+
+    owner_id = require_owner_id()
+    provider = str(payload.get("provider") or "").strip()
+    if provider not in PRESETS:
+        raise HTTPException(status_code=400, detail="Choose an AI provider.")
+    preset = PRESETS[provider]
+    base_url = str(payload.get("base_url") or preset["base_url"]).strip()[:500]
+    model = str(payload.get("model") or preset["model"]).strip()[:200]
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Enter the provider's base URL.")
+    if not model:
+        raise HTTPException(status_code=400, detail="Enter a model name.")
+    try:
+        base_url = validate_base_url(base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    changes = {"ai_provider": provider, "ai_base_url": base_url, "ai_model": model}
+    api_key = payload.get("api_key")
+    if isinstance(api_key, str) and api_key.strip():
+        key = api_key.strip()
+        if len(key) > 500:
+            raise HTTPException(status_code=400, detail="That API key is too long.")
+        changes["ai_api_key_enc"] = encrypt_secret(key)
+    elif payload.get("clear_key"):
+        changes["ai_api_key_enc"] = None
+
+    current = get_user_settings(owner_id)
+    has_key = bool(changes.get("ai_api_key_enc", current.get("ai_api_key_enc")))
+    if preset["needs_key"] and not has_key:
+        raise HTTPException(
+            status_code=400, detail=f"Paste your {preset['label']} API key."
+        )
+    update_user_settings(owner_id, **changes)
+    return _ai_settings_view(owner_id)
+
+
+@app.delete("/api/settings/ai")
+def delete_ai_settings():
+    from app.database import update_user_settings
+
+    owner_id = require_owner_id()
+    update_user_settings(
+        owner_id, ai_provider=None, ai_base_url=None, ai_model=None, ai_api_key_enc=None
+    )
+    return _ai_settings_view(owner_id)
+
+
+@app.post("/api/settings/ai/test")
+def test_ai_settings():
+    from app.ai_provider import AIProviderError, check_connection, user_ai_config
+
+    owner_id = require_owner_id()
+    config = user_ai_config(owner_id)
+    if config is None:
+        raise HTTPException(status_code=400, detail="Save a provider and key first.")
+    try:
+        reply = check_connection(config)
+    except (AIProviderError, ValueError) as exc:
+        return {"ok": False, "message": str(exc)}
+    except Exception:
+        logger.exception("AI connection test failed")
+        return {"ok": False, "message": f"Could not connect to {config.label}."}
+    return {
+        "ok": True,
+        "message": f"Connected to {config.label} ({config.model}).",
+        "reply": reply,
+    }
+
+
+# ---------- Settings: Google Calendar ----------
+
+def _calendar_redirect(status_key: str, message: str = "") -> RedirectResponse:
+    from app.integrations.google_calendar import STATE_COOKIE, STATE_COOKIE_PATH
+
+    query = {"calendar": status_key}
+    if message:
+        query["calendar_message"] = message
+    response = RedirectResponse("/?" + urlencode(query) + "#settings", status_code=302)
+    response.delete_cookie(STATE_COOKIE, path=STATE_COOKIE_PATH)
+    return response
+
+
+@app.get("/api/integrations/google-calendar/connect")
+def google_calendar_connect(request: Request):
+    from app.database import get_user_by_id
+    from app.google_auth import new_state
+    from app.integrations import google_calendar as gcal
+
+    owner_id = require_owner_id()
+    if not gcal.google_calendar_available():
+        raise HTTPException(
+            status_code=501,
+            detail="Google Calendar is not set up on this server yet "
+            "(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).",
+        )
+    state = new_state()
+    user = get_user_by_id(owner_id) or {}
+    callback_url = gcal.redirect_uri(str(request.base_url))
+    response = RedirectResponse(
+        gcal.authorization_url(
+            state=state, callback_url=callback_url, login_hint=user.get("email", "")
+        ),
+        status_code=302,
+    )
+    # Bind the state to this user so a different account cannot finish the flow.
+    response.set_cookie(
+        key=gcal.STATE_COOKIE,
+        value=f"{state}.{owner_id}",
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        max_age=10 * 60,
+        path=gcal.STATE_COOKIE_PATH,
+    )
+    return response
+
+
+@app.get("/api/integrations/google-calendar/callback")
+def google_calendar_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    from app.database import get_current_owner_id
+    from app.google_auth import states_match
+    from app.integrations import google_calendar as gcal
+
+    owner_id = get_current_owner_id()
+    if owner_id is None:
+        return _calendar_redirect("error", "Sign in again, then reconnect your calendar.")
+    if error:
+        return _calendar_redirect("error", "Calendar connection was cancelled.")
+    cookie = request.cookies.get(gcal.STATE_COOKIE, "")
+    expected_state, _, cookie_owner = cookie.rpartition(".")
+    if (
+        not states_match(expected_state, state)
+        or cookie_owner != str(owner_id)
+        or not code
+    ):
+        return _calendar_redirect("error", "Calendar connection expired. Try again.")
+    try:
+        gcal.connect_with_code(
+            owner_id, code=code, callback_url=gcal.redirect_uri(str(request.base_url))
+        )
+    except gcal.CalendarConnectionError as exc:
+        return _calendar_redirect("error", str(exc))
+    except Exception:
+        logger.exception("Google Calendar connect failed")
+        return _calendar_redirect("error", "Could not connect Google Calendar.")
+    return _calendar_redirect("connected")
+
+
+@app.post("/api/integrations/google-calendar/disconnect")
+def google_calendar_disconnect():
+    from app.integrations.google_calendar import connection_status, disconnect
+
+    owner_id = require_owner_id()
+    disconnect(owner_id)
+    return connection_status(owner_id)
 
 
 @app.get("/api/topics", response_model=List[Topic])

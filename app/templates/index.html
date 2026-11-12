@@ -28,6 +28,9 @@
         <a href="#inbox">Inbox</a>
       </nav>
       <div class="account">
+        <button id="settingsButton" type="button" class="icon-button" onclick="openSettings()" aria-label="Settings" title="Settings" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg>
+        </button>
         <span id="authUser" class="account-name">Checking session…</span>
         <button id="signOutButton" type="button" class="secondary small" onclick="logoutSession()" hidden>Sign out</button>
       </div>
@@ -310,6 +313,59 @@
       </footer>
     </div>
   </main>
+
+  <dialog id="settingsDialog" class="sheet" aria-labelledby="settingsTitle">
+    <div class="sheet-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button type="button" class="secondary small" onclick="closeSettings()">Done</button>
+    </div>
+
+    <section class="sheet-section" aria-labelledby="aiSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="aiSettingsTitle">AI provider</h3>
+        <span id="aiActive" class="badge">Built-in rules</span>
+      </div>
+      <p class="sub">Use your own key with Claude, ChatGPT, Gemini or an open-source model. It powers “Analyze” and “Ask My Inbox”. Your key is encrypted and never shown again.</p>
+      <form id="aiSettingsForm" class="settings-form" onsubmit="saveAiSettings(event)">
+        <label class="field">
+          <span>Provider</span>
+          <select id="aiProvider" onchange="onAiProviderChange()"></select>
+        </label>
+        <label class="field">
+          <span>Base URL</span>
+          <input id="aiBaseUrl" type="url" maxlength="500" placeholder="https://api.example.com/v1" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <input id="aiModel" type="text" maxlength="200" placeholder="model name" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>API key</span>
+          <input id="aiApiKey" type="password" maxlength="500" placeholder="Paste your API key" autocomplete="off" spellcheck="false" />
+        </label>
+        <p id="aiKeyHelp" class="hint"></p>
+        <div class="settings-actions">
+          <button type="submit" id="aiSaveButton">Save</button>
+          <button type="button" id="aiTestButton" class="secondary" onclick="testAiSettings()">Test connection</button>
+          <button type="button" id="aiRemoveButton" class="link danger-link" onclick="removeAiSettings()">Remove</button>
+        </div>
+        <p id="aiSettingsStatus" class="status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="sheet-section" aria-labelledby="calendarSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="calendarSettingsTitle">Google Calendar</h3>
+        <span id="calendarBadge" class="badge">Not connected</span>
+      </div>
+      <p class="sub">Connect your Google account to add dated tasks to your calendar. Life Inbox can only add events, and only after you confirm each one.</p>
+      <div class="settings-actions">
+        <a id="calendarConnect" class="button-link" href="/api/integrations/google-calendar/connect">Connect Google Calendar</a>
+        <button type="button" id="calendarDisconnect" class="secondary" onclick="disconnectCalendar()" hidden>Disconnect</button>
+      </div>
+      <p id="calendarSettingsStatus" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </dialog>
 
   <script src="/static/pagination_state.js"></script>
   <script src="/static/app.js"></script>
