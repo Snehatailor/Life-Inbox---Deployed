@@ -3517,10 +3517,11 @@ function renderDesktopPet() {
     return;
   }
   toggle.hidden = false;
-  const on = Boolean(desktopPetState.enabled);
+  // The switch shows what you see: on only while the pet is actually running.
+  const on = Boolean(desktopPetState.enabled && desktopPetState.running);
   toggle.setAttribute('aria-checked', String(on));
   toggle.title = on
-    ? (desktopPetState.running ? 'The pet is running. Click to turn it off.' : 'The pet is on but not running.')
+    ? 'The pet is on your screen. Click to send it to sleep.'
     : 'Click to bring the pet onto your screen.';
 }
 
@@ -3535,7 +3536,7 @@ async function loadDesktopPet() {
 
 async function toggleDesktopPet() {
   if (!desktopPetState) return;
-  const turnOn = !desktopPetState.enabled;
+  const turnOn = !(desktopPetState.enabled && desktopPetState.running);
   const toggle = document.getElementById('desktopPetToggle');
   toggle.disabled = true;
   setStatus('desktopPetStatus', turnOn ? 'Waking the pet…' : 'Sending the pet to sleep…');

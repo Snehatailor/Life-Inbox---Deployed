@@ -924,3 +924,10 @@ button.danger-link { color: var(--danger); margin-left: auto; }
 
 /* Compatibility: the starter's stylesheet test looks for this selector. */
 .wrap { max-width: 980px; margin: 0 auto; }
+
+/* Hidden always wins over a component's own display value. */
+[hidden] { display: none !important; }
+
+/* Messages inside the account menu stay inside it (the narrow-screen rule above floats .status). */
+.account .account-menu .status, .account[open] .account-menu .status { position: static; width: auto; margin: 4px 10px 6px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+@media (max-width: 767px) { .account[open] .account-menu { width: min(280px, calc(100vw - 32px)); } }
