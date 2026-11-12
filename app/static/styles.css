@@ -945,3 +945,9 @@ button.danger-link { color: var(--danger); margin-left: auto; }
 .account-row-name { margin: 0; font-weight: 600; }
 .account-row .hint { margin: 2px 0 0; overflow-wrap: anywhere; }
 .account-row button { margin: 0; flex: none; }
+
+/* Recurring tasks */
+.repeat-pill { background: var(--accent-soft); color: var(--accent-text); }
+.repeat-days { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.repeat-days button.repeat-day { margin: 0; padding: 0.35rem 0.7rem; font-size: 13px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.repeat-days button.repeat-day[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
