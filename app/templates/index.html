@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <title>Life Inbox</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2026-11-12e" />
-  <link rel="stylesheet" href="/static/pet.css?v=2026-11-12e" />
+  <link rel="stylesheet" href="/static/styles.css?v=2026-11-12g" />
+  <link rel="stylesheet" href="/static/pet.css?v=2026-11-12g" />
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -466,6 +466,19 @@
       <button type="button" class="secondary small" onclick="closeSettings()">Done</button>
     </div>
 
+    <section class="sheet-section" aria-labelledby="accountSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="accountSettingsTitle">Account</h3>
+      </div>
+      <div class="account-row">
+        <div>
+          <p id="settingsAccountName" class="account-row-name"></p>
+          <p id="settingsAccountEmail" class="hint"></p>
+        </div>
+        <button type="button" id="settingsSignOut" class="secondary" onclick="logoutSession()">Sign out</button>
+      </div>
+    </section>
+
     <section class="sheet-section" aria-labelledby="aiSettingsTitle">
       <div class="sheet-section-head">
         <h3 id="aiSettingsTitle">AI provider</h3>
@@ -561,7 +574,7 @@
     </section>
   </dialog>
 
-  <script src="/static/pet.js?v=2026-11-12e"></script>
-  <script src="/static/app.js?v=2026-11-12e"></script>
+  <script src="/static/pet.js?v=2026-11-12g"></script>
+  <script src="/static/app.js?v=2026-11-12g"></script>
 </body>
 </html>

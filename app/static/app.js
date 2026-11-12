@@ -3401,7 +3401,17 @@ function renderCalendarSettings() {
   }
 }
 
+function renderAccountSettings() {
+  const signedIn = Boolean(currentUser) && currentUser.auth_provider !== 'local';
+  document.getElementById('settingsAccountName').textContent = currentUser ? currentUser.display_name : 'Not signed in';
+  document.getElementById('settingsAccountEmail').textContent = signedIn
+    ? currentUser.email
+    : 'Life Inbox is running on this computer without an account.';
+  document.getElementById('settingsSignOut').hidden = !signedIn;
+}
+
 async function loadSettings() {
+  renderAccountSettings();
   settingsState = await requestJson('/api/settings');
   renderAiSettings();
   renderCalendarSettings();

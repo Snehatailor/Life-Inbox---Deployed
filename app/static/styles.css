@@ -939,3 +939,9 @@ button.danger-link { color: var(--danger); margin-left: auto; }
 .welcome-art { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 28px; background: var(--accent-soft); }
 .welcome-others { margin-top: 10px; }
 .welcome-others a { color: var(--accent-text); }
+
+/* Settings: account row */
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.account-row-name { margin: 0; font-weight: 600; }
+.account-row .hint { margin: 2px 0 0; overflow-wrap: anywhere; }
+.account-row button { margin: 0; flex: none; }
