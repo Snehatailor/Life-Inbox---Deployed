@@ -2711,13 +2711,23 @@ def get_weekly_review(now: Optional[datetime] = None) -> dict:
         tasks = session.scalars(
             select(TaskRecord).where(TaskRecord.owner_user_id == owner_id)
         ).all()
-        # There is no completed_at column; a completed task's updated_at is
-        # the closest stored fact for when it was finished.
+        # completed_at records when a task was finished; tasks completed
+        # before that column existed fall back to their last update time.
+        completed_rows = [
+            task
+            for task in tasks
+            if task.status == TASK_COMPLETED
+            and in_window(task.completed_at or task.updated_at)
+        ]
         completed = [
             {"id": task.id, "text": task.text, "priority": task.priority}
-            for task in tasks
-            if task.status == TASK_COMPLETED and in_window(task.updated_at)
+            for task in completed_rows
         ]
+        done_by_priority = {"High": 0, "Medium": 0, "Low": 0}
+        for task in completed_rows:
+            if task.priority in done_by_priority:
+                done_by_priority[task.priority] += 1
+        habits_kept = sum(1 for task in completed_rows if task.repeat_rule)
         open_task_count = sum(1 for task in tasks if task.status == TASK_OPEN)
 
         insights = {}
@@ -2782,10 +2792,27 @@ def get_weekly_review(now: Optional[datetime] = None) -> dict:
             if item.id not in insights and item.id not in linked_item_ids
         ]
 
+    # Goal days, best day and streak reuse the daily ring's own numbers
+    # (point_events per day, same goal and streak rules), so they never disagree.
+    game = game_summary_from_db()
+    week_days = game["history"]
+    best = max(week_days, key=lambda entry: (entry["points"], entry["day"]), default=None)
+    stats = {
+        "done_by_priority": done_by_priority,
+        "week_days": week_days,
+        "goal": game["goal"],
+        "goal_days": sum(1 for entry in week_days if entry["goal_met"]),
+        "best_day": best if best and best["points"] > 0 else None,
+        "streak": game["streak"],
+        "habits_kept": habits_kept,
+        "points_this_week": sum(entry["points"] for entry in week_days),
+    }
+
     return {
         "since": since.isoformat(),
         "until": now.isoformat(),
         "days": WEEKLY_REVIEW_DAYS,
+        "stats": stats,
         "captured": {"total": len(items), "by_type": captured_by_type},
         "completed_tasks": completed,
         "open_task_count": open_task_count,
