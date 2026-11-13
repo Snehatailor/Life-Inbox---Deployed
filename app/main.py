@@ -1282,7 +1282,11 @@ def clear_task_slot(task_id: int):
 
 @app.get("/pet", response_class=HTMLResponse)
 def pet_page():
-    return (APP_DIR / "templates" / "pet.html").read_text(encoding="utf-8")
+    # Revalidate the page so a new deploy's versioned CSS/JS links are picked up.
+    return HTMLResponse(
+        (APP_DIR / "templates" / "pet.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
@@ -2202,4 +2206,8 @@ def analyze_inbox():
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (APP_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+    # Revalidate the page so a new deploy's versioned CSS/JS links are picked up.
+    return HTMLResponse(
+        (APP_DIR / "templates" / "index.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache"},
+    )
