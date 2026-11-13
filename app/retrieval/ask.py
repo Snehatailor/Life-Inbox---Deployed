@@ -176,6 +176,7 @@ def _validate_llm_payload(
 def _synthesize_from_evidence(
     question: str,
     citations: list[dict],
+    ai_config=None,
 ) -> Optional[dict]:
     """Call OpenAI with retrieved evidence only. Returns validated fields or None."""
     evidence = _pack_evidence(citations)
@@ -212,11 +213,16 @@ Evidence (JSON):
 {json.dumps(evidence, ensure_ascii=False)}
 """
 
-    from openai import OpenAI
+    if ai_config is None or ai_config.kind == "server_openai":
+        from openai import OpenAI
 
-    client = OpenAI()
-    response = client.responses.create(model=ASK_MODEL, input=prompt)
-    raw = getattr(response, "output_text", None)
+        client = OpenAI()
+        response = client.responses.create(model=ASK_MODEL, input=prompt)
+        raw = getattr(response, "output_text", None)
+    else:
+        from app.ai_provider import complete_text
+
+        raw = complete_text(prompt, ai_config)
     if not isinstance(raw, str) or not raw.strip():
         return None
     parsed = extract_json_object(raw)
@@ -248,10 +254,12 @@ def build_grounded_answer(
 
     citations = _build_citations(ranked)
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if api_key:
+    from app.ai_provider import resolve_ai_config
+
+    ai_config = resolve_ai_config()
+    if ai_config is not None:
         try:
-            synthesized = _synthesize_from_evidence(question, citations)
+            synthesized = _synthesize_from_evidence(question, citations, ai_config)
             if synthesized is not None:
                 if synthesized["confidence"] == "insufficient":
                     return {

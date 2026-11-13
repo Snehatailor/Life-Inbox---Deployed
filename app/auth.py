@@ -6,6 +6,8 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
+import threading
 import time
 from typing import Optional
 
@@ -100,6 +102,150 @@ def optional_current_user(
         return get_current_user(request, life_inbox_session)
     except HTTPException:
         return None
+
+
+# --- Email + password accounts -------------------------------------------
+
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 200
+_SCRYPT_N = 2**14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 32
+
+# Failed sign-in throttling (per process, in memory).
+LOGIN_MAX_FAILURES = 10
+LOGIN_WINDOW_SECONDS = 15 * 60
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+    )
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: Optional[str]) -> bool:
+    if not stored:
+        return False
+    try:
+        scheme, n, r, p, salt_hex, digest_hex = stored.split("$")
+        if scheme != "scrypt":
+            return False
+        expected = bytes.fromhex(digest_hex)
+        actual = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=bytes.fromhex(salt_hex),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=len(expected),
+        )
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(actual, expected)
+
+
+# Verified against when the email is unknown, so timing does not reveal
+# which emails have accounts.
+_DUMMY_HASH = hash_password(secrets.token_hex(16))
+
+
+def _clean_email(email: str) -> str:
+    cleaned = (email or "").strip().lower()
+    if (
+        "@" not in cleaned
+        or len(cleaned) < 5
+        or len(cleaned) > 200
+        or cleaned.startswith("@")
+        or cleaned.endswith("@")
+    ):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    return cleaned
+
+
+def _validate_new_password(password: str) -> None:
+    if not isinstance(password, str) or len(password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {PASSWORD_MIN_LENGTH} characters.",
+        )
+    if len(password) > PASSWORD_MAX_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at most {PASSWORD_MAX_LENGTH} characters.",
+        )
+
+
+def _recent_failures(key: str, now: float) -> list[float]:
+    recent = [t for t in _login_failures.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
+    if recent:
+        _login_failures[key] = recent
+    else:
+        _login_failures.pop(key, None)
+    return recent
+
+
+def reset_login_throttle_for_tests() -> None:
+    with _login_failures_lock:
+        _login_failures.clear()
+
+
+def register_password_user(
+    email: str,
+    password: str,
+    display_name: Optional[str] = None,
+) -> dict:
+    from app.database import UserAlreadyExistsError, create_password_user
+
+    cleaned = _clean_email(email)
+    _validate_new_password(password)
+    if cleaned == "local@life-inbox.local":
+        raise HTTPException(status_code=400, detail="That email is reserved.")
+    try:
+        return create_password_user(
+            email=cleaned,
+            display_name=(display_name or "").strip()[:100],
+            password_hash=hash_password(password),
+        )
+    except UserAlreadyExistsError:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists. Sign in instead.",
+        )
+
+
+def password_login_user(email: str, password: str) -> dict:
+    from app.database import get_password_login
+
+    cleaned = _clean_email(email)
+    now = time.time()
+    with _login_failures_lock:
+        if len(_recent_failures(cleaned, now)) >= LOGIN_MAX_FAILURES:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many failed sign-in attempts. Try again in 15 minutes.",
+            )
+
+    found = get_password_login(cleaned)
+    stored_hash = found[1] if found else None
+    ok = verify_password(password or "", stored_hash or _DUMMY_HASH)
+    if not found or not stored_hash or not ok:
+        with _login_failures_lock:
+            _login_failures.setdefault(cleaned, []).append(now)
+        raise HTTPException(status_code=401, detail="Wrong email or password.")
+
+    with _login_failures_lock:
+        _login_failures.pop(cleaned, None)
+    return found[0]
 
 
 def dev_login_user(email: str, display_name: Optional[str] = None) -> dict:

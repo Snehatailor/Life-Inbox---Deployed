@@ -186,12 +186,17 @@ def analyze_inbox_with_openai(notes: list[dict]) -> dict:
             notes,
         )
 
-    if not os.getenv("OPENAI_API_KEY"):
+    from app.ai_provider import complete_text, resolve_ai_config
+
+    ai_config = resolve_ai_config()
+    if ai_config is None:
         return validate_analysis_result(fallback_analyze(notes), notes)
 
     try:
-        from openai import OpenAI
-        client = OpenAI()
+        client = None
+        if ai_config.kind == "server_openai":
+            from openai import OpenAI
+            client = OpenAI()
 
         compact_notes = [{"id": n["id"], "text": n["text"]} for n in notes]
 
@@ -256,13 +261,19 @@ Saved notes:
 {json.dumps(compact_notes, ensure_ascii=False)}
 """
 
-        response = client.responses.create(model=MODEL, input=prompt)
-        result = extract_json_object(response.output_text)
-        result["mode"] = "openai"
+        if client is not None:
+            response = client.responses.create(model=MODEL, input=prompt)
+            raw_text = response.output_text
+            mode = "openai"
+        else:
+            raw_text = complete_text(prompt, ai_config)
+            mode = "ai_provider"
+        result = extract_json_object(raw_text)
+        result["mode"] = mode
         return validate_analysis_result(result, notes)
 
     except Exception:
-        logger.exception("OpenAI analysis failed; using deterministic fallback")
+        logger.exception("AI analysis failed; using deterministic fallback")
         fallback = fallback_analyze(notes)
         fallback["mode"] = "fallback_after_api_error"
         return validate_analysis_result(fallback, notes)

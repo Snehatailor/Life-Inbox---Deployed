@@ -26,6 +26,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.attention.dates import today_in_configured_tz
@@ -63,12 +64,15 @@ from app.capture.pipeline import (
     VOICE_ITEM_TYPE,
 )
 from app.capture.storage import delete_stored_file
+from app.config import normalize_database_url
 from app.similarity import find_item_relations
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "life_inbox.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DB_PATH}"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+DATABASE_URL = normalize_database_url(
+    os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+)
 AUTO_CREATE_TABLES = os.getenv(
     "LIFE_INBOX_AUTO_CREATE_TABLES", ""
 ).strip().lower() in {"1", "true", "yes"}
@@ -118,6 +122,8 @@ class UserRecord(Base):
     display_name = Column(Text, nullable=False)
     auth_provider = Column(Text, nullable=False)
     created_at = Column(Text, nullable=False)
+    # Only set for email + password accounts. Never returned to clients.
+    password_hash = Column(Text, nullable=True)
 
 
 class InboxItemRecord(Base):
@@ -267,6 +273,62 @@ class TaskRecord(Base):
     slot_set_at = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
+
+
+class UserSettingsRecord(Base):
+    """One row per user. Secret columns hold encrypted text only."""
+
+    __tablename__ = "user_settings"
+
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    ai_provider = Column(Text, nullable=True)
+    ai_base_url = Column(Text, nullable=True)
+    ai_model = Column(Text, nullable=True)
+    ai_api_key_enc = Column(Text, nullable=True)
+    google_calendar_token_enc = Column(Text, nullable=True)
+    google_calendar_email = Column(Text, nullable=True)
+    updated_at = Column(Text, nullable=False)
+
+
+_SETTINGS_FIELDS = (
+    "ai_provider",
+    "ai_base_url",
+    "ai_model",
+    "ai_api_key_enc",
+    "google_calendar_token_enc",
+    "google_calendar_email",
+)
+
+
+def get_user_settings(owner_user_id: int) -> dict:
+    """Raw settings for one user (secret columns still encrypted)."""
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            return {field: None for field in _SETTINGS_FIELDS}
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
+
+
+def update_user_settings(owner_user_id: int, **changes) -> dict:
+    """Set the given columns for one user; None clears a column."""
+    unknown = set(changes) - set(_SETTINGS_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown settings fields: {sorted(unknown)}")
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            row = UserSettingsRecord(
+                user_id=owner_user_id,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            session.add(row)
+        for field, value in changes.items():
+            setattr(row, field, value)
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
 
 
 class ShopPurchaseRecord(Base):
@@ -455,6 +517,50 @@ def ensure_user(
             session.add(user)
             session.commit()
         return _user_to_dict(user)
+
+
+class UserAlreadyExistsError(ValueError):
+    """An account with this email already exists."""
+
+
+def create_password_user(
+    *,
+    email: str,
+    display_name: str,
+    password_hash: str,
+) -> dict:
+    cleaned = email.strip().lower()
+    with SessionLocal() as session:
+        existing = session.scalar(
+            select(UserRecord).where(UserRecord.email == cleaned)
+        )
+        if existing is not None:
+            raise UserAlreadyExistsError(cleaned)
+        user = UserRecord(
+            email=cleaned,
+            display_name=display_name.strip() or cleaned.split("@", 1)[0],
+            auth_provider="password",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            password_hash=password_hash,
+        )
+        session.add(user)
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise UserAlreadyExistsError(cleaned) from exc
+        return _user_to_dict(user)
+
+
+def get_password_login(email: str) -> Optional[tuple[dict, Optional[str]]]:
+    """Return (public user dict, password hash) for an email, or None."""
+    with SessionLocal() as session:
+        user = session.scalar(
+            select(UserRecord).where(UserRecord.email == email.strip().lower())
+        )
+        if user is None:
+            return None
+        return _user_to_dict(user), user.password_hash
 
 
 def get_or_create_default_owner_id() -> int:

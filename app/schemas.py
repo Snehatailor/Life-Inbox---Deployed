@@ -90,6 +90,7 @@ class ExtractedTextUpdate(BaseModel):
 Priority = Literal["High", "Medium", "Low"]
 AnalysisMode = Literal[
     "openai",
+    "ai_provider",
     "fallback_no_api_call",
     "fallback_after_api_error",
     "empty_inbox",

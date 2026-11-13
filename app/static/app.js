@@ -1306,30 +1306,48 @@ async function previewCalendarForTask(task) {
       `<div>${esc(preview.title)} · ${esc(preview.start_date)} (${esc(preview.timezone)})</div>`,
       `<div class="provenance">${(preview.notes || []).map(note => esc(note)).join(' · ')}</div>`
     ].join('');
-    const confirmBtn = actionButton('Confirm (mock only)', '', async () => {
+    const isGoogle = preview.provider === 'google' && preview.draft_id.startsWith('gcal-') && !preview.draft_id.startsWith('gcal-preview-');
+    const confirmBtn = actionButton(isGoogle ? 'Add to Google Calendar' : 'Confirm (mock only)', '', async () => {
+      confirmBtn.disabled = true;
       try {
-        const confirmed = await fetchJson(
-          '/api/calendar/confirm',
-          {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({draft_id: preview.draft_id})
-          },
-          'Unable to confirm calendar action.'
-        );
-        setStatus(
-          'calendarStatus',
-          confirmed.status === 'confirmed_mock'
-            ? 'Mock calendar confirmation recorded. No external event created.'
-            : `Calendar action status: ${confirmed.status}`
-        );
-        root.innerHTML += `<div class="provenance"><span class="label">Receipt</span>: ${esc(confirmed.status)} / ${esc(confirmed.provider)}</div>`;
+        const confirmed = await requestJson('/api/calendar/confirm', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({draft_id: preview.draft_id})
+        });
+        confirmBtn.remove();
+        if (confirmed.status === 'created') {
+          setStatus('calendarStatus', 'Added to your Google Calendar.');
+          if (confirmed.link && /^https:\/\/(www\.)?(calendar\.)?google\.com\//.test(confirmed.link)) {
+            const link = document.createElement('a');
+            link.href = confirmed.link;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'Open in Google Calendar';
+            link.className = 'button-link small';
+            root.appendChild(link);
+          }
+        } else {
+          setStatus(
+            'calendarStatus',
+            confirmed.status === 'confirmed_mock'
+              ? 'Mock calendar confirmation recorded. Connect Google Calendar in Settings to add real events.'
+              : `Calendar action status: ${confirmed.status}`
+          );
+          root.innerHTML += `<div class="provenance"><span class="label">Receipt</span>: ${esc(confirmed.status)} / ${esc(confirmed.provider)}</div>`;
+        }
       } catch (error) {
+        confirmBtn.disabled = false;
         setStatus('calendarStatus', error.message || 'Calendar confirm blocked or failed.', true);
       }
     });
     root.appendChild(confirmBtn);
-    setStatus('calendarStatus', 'Preview ready — confirm explicitly to record a mock receipt.');
+    setStatus(
+      'calendarStatus',
+      isGoogle
+        ? 'Check the details, then add it to your Google Calendar.'
+        : 'Preview ready — confirm explicitly to record a mock receipt.'
+    );
   } catch (error) {
     setStatus('calendarStatus', error.message || 'Calendar preview failed.', true);
   }
@@ -1382,13 +1400,78 @@ function goToCalendarToday() {
   renderCalendar();
 }
 
+// ---------- Sign-in gate ----------
+// Until someone is signed in, a full-screen sign-in card covers the app. After
+// signing in or out the page reloads so every screen loads for the right person.
+let authConfig = {allow_dev_login: false, anonymous_local_owner: false, google_login: false};
+let authMode = 'login';
+let currentUser = null;
+
+async function loadAuthConfig() {
+  try {
+    authConfig = await fetchJson('/api/auth/config', {}, 'Unable to load sign-in options.');
+  } catch {
+    // Keep safe defaults: password sign-in only.
+  }
+}
+
+function applyAuthState() {
+  const signedInAccount = Boolean(currentUser) && currentUser.auth_provider !== 'local';
+  const canUseApp = Boolean(currentUser);
+  const authUser = document.getElementById('authUser');
+  authUser.textContent = currentUser ? currentUser.display_name : 'Not signed in';
+  authUser.title = currentUser ? `Signed in as ${currentUser.email}` : '';
+  document.getElementById('authGate').hidden = canUseApp;
+  document.querySelector('.app-shell').toggleAttribute('inert', !canUseApp);
+  document.getElementById('signOutButton').hidden = !signedInAccount;
+  document.getElementById('googleLogin').hidden = !authConfig.google_login;
+  document.getElementById('devLoginForm').hidden = !authConfig.allow_dev_login;
+  document.body.classList.toggle('signed-out', !canUseApp);
+}
+
 async function loadAuthUser() {
   try {
-    const user = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
-    document.getElementById('authUser').textContent =
-      `Signed in as ${user.display_name} <${user.email}> (${user.auth_provider})`;
+    currentUser = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
   } catch {
-    document.getElementById('authUser').textContent = 'Not signed in';
+    currentUser = null;
+  }
+  applyAuthState();
+  return currentUser;
+}
+
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  const registering = authMode === 'register';
+  document.getElementById('authSubmit').textContent = registering ? 'Create account' : 'Sign in';
+  document.getElementById('authTitle').textContent = registering ? 'Create your account' : 'Sign in';
+  document.getElementById('authModeToggle').textContent = registering
+    ? 'I already have an account'
+    : 'Create an account';
+  document.getElementById('authNameLabel').hidden = !registering;
+  document.getElementById('authPassword').autocomplete = registering ? 'new-password' : 'current-password';
+  setStatus('authStatus', '');
+}
+
+async function passwordAuth(event) {
+  event.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return;
+  const registering = authMode === 'register';
+  const body = registering
+    ? {email, password, display_name: document.getElementById('authName').value.trim()}
+    : {email, password};
+  setButtonBusy('authSubmit', true, registering ? 'Creating…' : 'Signing in…', registering ? 'Create account' : 'Sign in');
+  try {
+    await requestJson(registering ? '/api/auth/register' : '/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    location.reload();
+  } catch (error) {
+    setStatus('authStatus', error.message || 'Sign-in failed.', true);
+    setButtonBusy('authSubmit', false, '', registering ? 'Create account' : 'Sign in');
   }
 }
 
@@ -1397,22 +1480,12 @@ async function devLogin(event) {
   const email = document.getElementById('devLoginEmail').value.trim();
   if (!email) return;
   try {
-    const user = await fetchJson(
-      '/api/auth/dev-login',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email})
-      },
-      'Unable to sign in.'
-    );
-    setStatus('authStatus', `Signed in as ${user.email}`);
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-      await loadCalendar();
+    await requestJson('/api/auth/dev-login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email})
+    });
+    location.reload();
   } catch {
     setStatus('authStatus', 'Sign-in failed (dev login may be disabled).', true);
   }
@@ -1421,15 +1494,8 @@ async function devLogin(event) {
 async function logoutSession() {
   try {
     await fetchJson('/api/auth/logout', {method: 'POST'}, 'Unable to sign out.');
-    setStatus('authStatus', 'Signed out.');
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-      await loadCalendar();
-  } catch {
-    setStatus('authStatus', 'Sign-out failed.', true);
+  } finally {
+    location.reload();
   }
 }
 
@@ -2521,7 +2587,14 @@ setUpCaptureBox();
 showSkeleton('tasksList', 2);
 
 syncControlsFromUrl();
-loadAuthUser();
+loadAuthConfig().then(loadAuthUser).then(user => {
+  if (user) {
+    handleSettingsRedirect();
+    loadDesktopPet();
+  } else {
+    showRedirectAuthError();
+  }
+});
 refreshAll();
 loadSearch();
 loadLatestAnalysis();
@@ -3218,3 +3291,266 @@ async function syncInPagePet(known) {
   } catch { /* the pet is optional */ }
 }
 syncInPagePet();
+
+// ---------- Shared: JSON requests that keep the server's error message ----------
+
+async function requestJson(url, options = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch {
+    throw new Error('Could not reach the server.');
+  }
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    throw new Error(data && typeof data.detail === 'string' ? data.detail : 'Something went wrong.');
+  }
+  return data;
+}
+
+function showRedirectAuthError() {
+  // Google sign-in sends errors back as ?auth_error=...; show once, then tidy the URL.
+  const params = new URLSearchParams(location.search);
+  const message = params.get('auth_error');
+  if (!message) return;
+  setStatus('authStatus', message.slice(0, 200), true);
+  params.delete('auth_error');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + location.hash);
+}
+
+// ---------- Settings sheet: AI provider + Google Calendar ----------
+
+let settingsState = null;
+
+function presetById(id) {
+  return (settingsState?.presets || []).find(preset => preset.id === id) || null;
+}
+
+function renderAiSettings() {
+  const ai = settingsState.ai;
+  const select = document.getElementById('aiProvider');
+  if (!select.options.length) {
+    select.add(new Option('Built-in rules (no AI)', ''));
+    for (const preset of settingsState.presets) select.add(new Option(preset.label, preset.id));
+  }
+  select.value = ai.provider || '';
+  document.getElementById('aiBaseUrl').value = ai.base_url || '';
+  document.getElementById('aiModel').value = ai.model || '';
+  document.getElementById('aiApiKey').value = '';
+  document.getElementById('aiApiKey').placeholder = ai.has_key
+    ? `Saved key ${ai.key_hint || ''} · paste a new one to replace it`
+    : 'Paste your API key';
+  const active = ai.active || {};
+  const badge = document.getElementById('aiActive');
+  badge.textContent = active.source === 'none' ? 'Built-in rules' : (active.model || active.label);
+  badge.classList.toggle('on', active.source !== 'none');
+  document.getElementById('aiRemoveButton').hidden = !ai.provider;
+  document.getElementById('aiTestButton').hidden = !ai.provider;
+  updateAiFieldVisibility();
+}
+
+function updateAiFieldVisibility() {
+  const preset = presetById(document.getElementById('aiProvider').value);
+  for (const fieldId of ['aiBaseUrl', 'aiModel', 'aiApiKey']) {
+    document.getElementById(fieldId).closest('.field').hidden = !preset;
+  }
+  document.getElementById('aiKeyHelp').textContent = preset
+    ? preset.key_help
+    : 'Life Inbox works without AI using built-in rules. Pick a provider to use your own model.';
+  document.getElementById('aiSaveButton').textContent = preset ? 'Save' : 'Use built-in rules';
+}
+
+function onAiProviderChange() {
+  const preset = presetById(document.getElementById('aiProvider').value);
+  if (preset) {
+    document.getElementById('aiBaseUrl').value = preset.base_url;
+    document.getElementById('aiModel').value = preset.model;
+  }
+  setStatus('aiSettingsStatus', '');
+  updateAiFieldVisibility();
+}
+
+function renderCalendarSettings() {
+  const calendar = settingsState.calendar;
+  const badge = document.getElementById('calendarBadge');
+  const connect = document.getElementById('calendarConnect');
+  const disconnect = document.getElementById('calendarDisconnect');
+  if (!calendar.available) {
+    badge.textContent = 'Not set up';
+    badge.classList.remove('on');
+    connect.hidden = true;
+    disconnect.hidden = true;
+    setStatus('calendarSettingsStatus', 'The site owner needs to add a Google OAuth client before calendars can be connected. Until then, “Add to Google Calendar” links and the .ics download still work.');
+    return;
+  }
+  badge.textContent = calendar.connected ? 'Connected' : 'Not connected';
+  badge.classList.toggle('on', calendar.connected);
+  connect.hidden = calendar.connected;
+  disconnect.hidden = !calendar.connected;
+  if (calendar.connected) {
+    setStatus('calendarSettingsStatus', `Connected as ${calendar.email || 'your Google account'}. Confirmed tasks are added to your calendar.`);
+  }
+}
+
+async function loadSettings() {
+  settingsState = await requestJson('/api/settings');
+  renderAiSettings();
+  renderCalendarSettings();
+}
+
+async function openSettings() {
+  const dialog = document.getElementById('settingsDialog');
+  const menu = document.querySelector('details.account');
+  if (menu) menu.open = false;
+  if (!dialog.open) dialog.showModal();
+  try {
+    await loadSettings();
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  }
+}
+
+function closeSettings() {
+  document.getElementById('settingsDialog').close();
+}
+
+async function saveAiSettings(event) {
+  event.preventDefault();
+  const provider = document.getElementById('aiProvider').value;
+  setButtonBusy('aiSaveButton', true, 'Saving…', 'Save');
+  try {
+    if (!provider) {
+      settingsState.ai = await requestJson('/api/settings/ai', {method: 'DELETE'});
+      setStatus('aiSettingsStatus', 'Using built-in rules. No AI provider is called.');
+    } else {
+      const body = {
+        provider,
+        base_url: document.getElementById('aiBaseUrl').value.trim(),
+        model: document.getElementById('aiModel').value.trim(),
+      };
+      const key = document.getElementById('aiApiKey').value.trim();
+      if (key) body.api_key = key;
+      settingsState.ai = await requestJson('/api/settings/ai', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      setStatus('aiSettingsStatus', 'Saved. Use “Test connection” to check it.');
+    }
+    renderAiSettings();
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  } finally {
+    setButtonBusy('aiSaveButton', false, 'Saving…', document.getElementById('aiProvider').value ? 'Save' : 'Use built-in rules');
+  }
+}
+
+async function testAiSettings() {
+  setButtonBusy('aiTestButton', true, 'Testing…', 'Test connection');
+  setStatus('aiSettingsStatus', 'Sending a tiny test message…');
+  try {
+    const result = await requestJson('/api/settings/ai/test', {method: 'POST'});
+    setStatus('aiSettingsStatus', result.message, !result.ok);
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  } finally {
+    setButtonBusy('aiTestButton', false, 'Testing…', 'Test connection');
+  }
+}
+
+async function removeAiSettings() {
+  try {
+    settingsState.ai = await requestJson('/api/settings/ai', {method: 'DELETE'});
+    renderAiSettings();
+    setStatus('aiSettingsStatus', 'Removed. Life Inbox is back on built-in rules.');
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  }
+}
+
+async function disconnectCalendar() {
+  try {
+    settingsState.calendar = await requestJson('/api/integrations/google-calendar/disconnect', {method: 'POST'});
+    renderCalendarSettings();
+    setStatus('calendarSettingsStatus', 'Disconnected. Life Inbox no longer has access to your calendar.');
+    if (typeof loadGcalStatus === 'function') loadGcalStatus();
+  } catch (error) {
+    setStatus('calendarSettingsStatus', error.message, true);
+  }
+}
+
+function handleSettingsRedirect() {
+  // Google sends people back with ?calendar=connected|error[&calendar_message=…]#settings
+  const params = new URLSearchParams(location.search);
+  const result = params.get('calendar');
+  const wantsSettings = location.hash === '#settings' || Boolean(result);
+  if (!wantsSettings) return;
+  params.delete('calendar');
+  const message = params.get('calendar_message');
+  params.delete('calendar_message');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + '#today');
+  openSettings().then(() => {
+    if (result === 'connected') {
+      setStatus('calendarSettingsStatus', 'Google Calendar connected. Confirmed tasks are added to your calendar.');
+      if (typeof loadGcalStatus === 'function') loadGcalStatus();
+    } else if (result === 'error') {
+      setStatus('calendarSettingsStatus', (message || 'Could not connect Google Calendar.').slice(0, 200), true);
+    }
+  });
+}
+
+// ---------- Desktop pet on/off (only when Life Inbox runs on this computer) ----------
+
+let desktopPetState = null;
+
+function renderDesktopPet() {
+  const toggle = document.getElementById('desktopPetToggle');
+  if (!desktopPetState || !desktopPetState.available) {
+    toggle.hidden = true;
+    return;
+  }
+  toggle.hidden = false;
+  const on = Boolean(desktopPetState.enabled);
+  toggle.setAttribute('aria-checked', String(on));
+  toggle.title = on
+    ? (desktopPetState.running ? 'The pet is running. Click to turn it off.' : 'The pet is on but not running.')
+    : 'Click to bring the pet onto your screen.';
+}
+
+async function loadDesktopPet() {
+  try {
+    desktopPetState = await requestJson('/api/desktop-pet');
+  } catch {
+    desktopPetState = null;
+  }
+  renderDesktopPet();
+}
+
+async function toggleDesktopPet() {
+  if (!desktopPetState) return;
+  const turnOn = !desktopPetState.enabled;
+  const toggle = document.getElementById('desktopPetToggle');
+  toggle.disabled = true;
+  setStatus('desktopPetStatus', turnOn ? 'Waking the pet…' : 'Sending the pet to sleep…');
+  try {
+    desktopPetState = await requestJson('/api/desktop-pet', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: turnOn})
+    });
+    setStatus('desktopPetStatus', turnOn ? 'The pet is on your screen.' : 'The pet is off.');
+  } catch (error) {
+    await loadDesktopPet();
+    setStatus('desktopPetStatus', error.message, true);
+  } finally {
+    toggle.disabled = false;
+    renderDesktopPet();
+  }
+}

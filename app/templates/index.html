@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <title>Life Inbox</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/pet.css" />
 </head>
@@ -25,6 +22,56 @@
       <path d="m12 7.2 1.55 3.15 3.45.5-2.5 2.45.6 3.45L12 15.1l-3.1 1.65.6-3.45L7 10.85l3.45-.5Z" fill="#b97a00" fill-opacity=".85"/>
     </symbol>
   </svg>
+  <div id="authGate" class="auth-gate" hidden>
+    <div class="auth-gate-inner">
+      <div class="hero-copy">
+        <p class="eyebrow">Your second brain, kept private</p>
+        <h1 class="display">Capture anything.<br />Find it when it matters.</h1>
+        <p class="lede">Notes, links, PDFs, screenshots and voice memos land in one calm inbox. Life Inbox turns them into tasks with dates, points and streaks, and answers questions from your own items.</p>
+        <ul class="feature-list">
+          <li><span class="dot dot-blue" aria-hidden="true"></span>Every account only sees its own notes</li>
+          <li><span class="dot dot-green" aria-hidden="true"></span>Daily quests, streaks and a pet that cheers you on</li>
+          <li><span class="dot dot-orange" aria-hidden="true"></span>Answers cite your items, never guesses</li>
+        </ul>
+      </div>
+      <div id="authCard" class="auth-card">
+        <h2 class="card-title" id="authTitle">Sign in</h2>
+        <p class="card-sub">Use your email, or continue with Google.</p>
+        <form id="passwordForm" class="gate-form" onsubmit="passwordAuth(event)">
+          <label class="field">
+            <span>Email</span>
+            <input id="authEmail" type="email" maxlength="200" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="At least 8 characters" required />
+          </label>
+          <label id="authNameLabel" class="field" hidden>
+            <span>Name <em>(optional)</em></span>
+            <input id="authName" type="text" maxlength="100" autocomplete="name" placeholder="What should we call you?" />
+          </label>
+          <button id="authSubmit" type="submit" class="block">Sign in</button>
+          <button id="authModeToggle" type="button" class="link" onclick="toggleAuthMode()">Create an account</button>
+        </form>
+        <div id="googleLogin" class="auth-social" hidden>
+          <div class="divider"><span>or</span></div>
+          <a class="google-button" href="/api/auth/google/start">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"/><path fill="#FBBC05" d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1a10 10 0 0 0 0 9.2L6.4 14z"/><path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10c.8-2.3 3-4.1 5.6-4.1z"/></svg>
+            Continue with Google
+          </a>
+        </div>
+        <form id="devLoginForm" class="gate-form dev-form" onsubmit="devLogin(event)" hidden>
+          <label class="field">
+            <span>Dev login email <em>(no password, local testing only)</em></span>
+            <input id="devLoginEmail" type="email" maxlength="200" placeholder="you@example.com" required />
+          </label>
+          <button type="submit" class="secondary block">Dev sign in</button>
+        </form>
+        <p id="authStatus" class="status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </div>
+
   <div class="app-shell">
     <!-- One nav: a sidebar on wide screens, a bottom tab bar on phones. -->
     <aside class="sidebar">
@@ -89,17 +136,22 @@
           </span>
           <span id="authUser" class="account-name">Checking session…</span>
         </summary>
-        <form id="devLoginForm" class="auth-form" onsubmit="devLogin(event)">
-          <label>
-            Dev login email
-            <input id="devLoginEmail" type="email" maxlength="200" placeholder="you@example.com" required />
-          </label>
-          <div class="auth-actions">
-            <button type="submit" class="secondary">Sign in</button>
-            <button type="button" class="ghost" onclick="logoutSession()">Sign out</button>
-          </div>
-        </form>
-        <p id="authStatus" class="status muted" role="status" aria-live="polite"></p>
+        <div class="account-menu">
+          <button id="settingsButton" type="button" class="ghost account-item" onclick="openSettings()">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg>
+            <span>Settings</span>
+          </button>
+          <button id="desktopPetToggle" type="button" class="ghost account-item pet-switch" role="switch" aria-checked="false" onclick="toggleDesktopPet()" hidden>
+            <span aria-hidden="true">🐾</span>
+            <span>Desktop pet</span>
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </button>
+          <p id="desktopPetStatus" class="status muted" role="status" aria-live="polite"></p>
+          <button id="signOutButton" type="button" class="ghost account-item" onclick="logoutSession()" hidden>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+            <span>Sign out</span>
+          </button>
+        </div>
       </details>
     </aside>
 
@@ -404,6 +456,59 @@
   <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
 
   <div id="petLayer" class="pet-layer" aria-live="polite"></div>
+  <dialog id="settingsDialog" class="sheet" aria-labelledby="settingsTitle">
+    <div class="sheet-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button type="button" class="secondary small" onclick="closeSettings()">Done</button>
+    </div>
+
+    <section class="sheet-section" aria-labelledby="aiSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="aiSettingsTitle">AI provider</h3>
+        <span id="aiActive" class="badge">Built-in rules</span>
+      </div>
+      <p class="sub">Use your own key with Claude, ChatGPT, Gemini or an open-source model. It powers “Analyze” and “Ask”. Your key is encrypted and never shown again.</p>
+      <form id="aiSettingsForm" class="settings-form" onsubmit="saveAiSettings(event)">
+        <label class="field">
+          <span>Provider</span>
+          <select id="aiProvider" onchange="onAiProviderChange()"></select>
+        </label>
+        <label class="field">
+          <span>Base URL</span>
+          <input id="aiBaseUrl" type="url" maxlength="500" placeholder="https://api.example.com/v1" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <input id="aiModel" type="text" maxlength="200" placeholder="model name" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>API key</span>
+          <input id="aiApiKey" type="password" maxlength="500" placeholder="Paste your API key" autocomplete="off" spellcheck="false" />
+        </label>
+        <p id="aiKeyHelp" class="hint"></p>
+        <div class="settings-actions">
+          <button type="submit" id="aiSaveButton">Save</button>
+          <button type="button" id="aiTestButton" class="secondary" onclick="testAiSettings()">Test connection</button>
+          <button type="button" id="aiRemoveButton" class="link danger-link" onclick="removeAiSettings()">Remove</button>
+        </div>
+        <p id="aiSettingsStatus" class="status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="sheet-section" aria-labelledby="calendarSettingsTitle">
+      <div class="sheet-section-head">
+        <h3 id="calendarSettingsTitle">Google Calendar</h3>
+        <span id="calendarBadge" class="badge">Not connected</span>
+      </div>
+      <p class="sub">Connect your Google account to add dated tasks straight to your calendar. Life Inbox can only add events, and only after you confirm each one.</p>
+      <div class="settings-actions">
+        <a id="calendarConnect" class="button-link" href="/api/integrations/google-calendar/connect">Connect Google Calendar</a>
+        <button type="button" id="calendarDisconnect" class="secondary" onclick="disconnectCalendar()" hidden>Disconnect</button>
+      </div>
+      <p id="calendarSettingsStatus" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </dialog>
+
   <script src="/static/pet.js"></script>
   <script src="/static/app.js"></script>
 </body>

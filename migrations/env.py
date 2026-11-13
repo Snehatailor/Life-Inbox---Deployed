@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.config import normalize_database_url
 from app.database import Base
 
 
@@ -16,7 +17,9 @@ target_metadata = Base.metadata
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    return normalize_database_url(
+        os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    )
 
 
 def include_object(object_, name, type_, reflected, compare_to) -> bool:

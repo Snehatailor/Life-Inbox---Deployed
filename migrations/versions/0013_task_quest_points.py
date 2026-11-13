@@ -1,7 +1,7 @@
 """Add Task Quest columns and the point_events ledger.
 
 Revision ID: 0013_task_quest_points
-Revises: 0012_topics_per_owner_unique
+Revises: 0014_user_settings (merged chain; originally 0012)
 """
 
 from typing import Optional, Sequence, Union
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision: str = "0013_task_quest_points"
-down_revision: Optional[str] = "0012_topics_per_owner_unique"
+down_revision: Optional[str] = "0014_user_settings"
 branch_labels: Optional[Union[str, Sequence[str]]] = None
 depends_on: Optional[Union[str, Sequence[str]]] = None
 
