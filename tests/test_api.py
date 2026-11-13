@@ -2248,3 +2248,11 @@ def test_second_owner_seeds_own_default_topics_on_migrated_database(
             database_module.engine.dispose()
         for module_name in module_names:
             sys.modules.pop(module_name, None)
+
+
+def test_pages_ask_browsers_to_revalidate(client):
+    for path in ("/", "/pet"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+        assert "text/html" in response.headers["content-type"]
