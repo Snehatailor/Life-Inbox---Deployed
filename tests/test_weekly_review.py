@@ -131,3 +131,95 @@ def test_model_failure_falls_back_to_rule_based_summary(env, monkeypatch, mock_k
     review = response.json()
     assert review["summary_kind"] == "rule_based"
     assert review["summary"].startswith("You captured 1 item")
+
+
+# ---------- Weekly stats card ----------
+
+def _points(db, owner_id: int, day, points: int) -> None:
+    with db.SessionLocal() as session:
+        session.add(
+            db.PointEventRecord(
+                owner_user_id=owner_id,
+                task_id=None,
+                points=points,
+                day=day.isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+        session.commit()
+
+
+def test_empty_week_stats_are_zero(env):
+    stats = env.client.get("/api/review/week").json()["stats"]
+    assert stats["done_by_priority"] == {"High": 0, "Medium": 0, "Low": 0}
+    assert len(stats["week_days"]) == 7
+    assert stats["goal_days"] == 0
+    assert stats["best_day"] is None
+    assert stats["streak"] == 0
+    assert stats["habits_kept"] == 0
+    assert stats["points_this_week"] == 0
+
+
+def test_seeded_week_gives_exact_stats(env):
+    from app.attention.dates import today_in_configured_tz
+
+    client, db = env.client, env.db
+    owner = db.get_or_create_default_owner_id()
+    today = today_in_configured_tz()
+    _points(db, owner, today - timedelta(days=1), 120)
+    _points(db, owner, today - timedelta(days=2), 100)
+    _points(db, owner, today - timedelta(days=3), 80)
+    _points(db, owner, today - timedelta(days=9), 500)   # outside the 7 days
+
+    created = {}
+    for text, priority in [("Ship report", "High"), ("Buy milk", "Medium"), ("Tidy desk", "Low"), ("Revise DSA", "Medium")]:
+        task = client.post("/api/tasks/quick", json={"sentence": text}).json()
+        client.patch(f"/api/tasks/{task['id']}", json={"priority": priority, "due_on": today.isoformat()})
+        created[text] = task["id"]
+    client.patch(f"/api/tasks/{created['Revise DSA']}", json={"repeat_rule": "daily"})
+    for task_id in created.values():
+        assert client.post(f"/api/tasks/{task_id}/complete").status_code == 200
+
+    review = client.get("/api/review/week").json()
+    stats = review["stats"]
+    assert stats["done_by_priority"] == {"High": 1, "Medium": 2, "Low": 1}
+    assert stats["habits_kept"] == 1
+    # Today: 30 + 20 + 10 + 20 = 80 points (goal not met).
+    by_day = {entry["day"]: entry for entry in stats["week_days"]}
+    assert by_day[today.isoformat()]["points"] == 80
+    assert stats["goal_days"] == 2
+    assert stats["best_day"]["day"] == (today - timedelta(days=1)).isoformat()
+    assert stats["best_day"]["points"] == 120
+    assert stats["streak"] == 2
+    assert stats["points_this_week"] == 120 + 100 + 80 + 80
+    # Same numbers as the daily ring.
+    game = client.get("/api/game/today").json()
+    assert game["streak"] == stats["streak"]
+    assert game["history"] == stats["week_days"]
+    assert "daily goal on 2 of the last 7 days" in review["summary"]
+    assert "1 habit" in review["summary"]
+
+
+def test_completed_at_decides_the_week(env):
+    client, db = env.client, env.db
+    task = client.post("/api/tasks/quick", json={"sentence": "Old task"}).json()
+    client.post(f"/api/tasks/{task['id']}/complete")
+    with db.SessionLocal() as session:
+        row = session.get(db.TaskRecord, task["id"])
+        row.completed_at = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        row.updated_at = datetime.now(timezone.utc).isoformat()   # edited today
+        session.commit()
+    review = client.get("/api/review/week").json()
+    assert review["completed_tasks"] == []
+    assert sum(review["stats"]["done_by_priority"].values()) == 0
+
+
+def test_other_users_points_never_appear(env):
+    from app.attention.dates import today_in_configured_tz
+
+    db = env.db
+    other = db.ensure_user(email="someone-else@example.com", display_name="Other", auth_provider="password")
+    _points(db, other["id"], today_in_configured_tz(), 999)
+    stats = env.client.get("/api/review/week").json()["stats"]
+    assert stats["points_this_week"] == 0
+    assert stats["goal_days"] == 0

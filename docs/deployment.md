@@ -82,6 +82,58 @@ Install Postgres driver when using compose: `pip install 'psycopg[binary]'`
 (or add to a private requirements overlay). The base `requirements.txt`
 stays SQLite-friendly for local teaching.
 
+## Email + password accounts
+
+`POST /api/auth/register` and `POST /api/auth/login` take
+`{"email", "password"}` (register also takes an optional `display_name`).
+Passwords are at least 8 characters and are stored only as salted scrypt
+hashes in `users.password_hash`. Ten failed sign-ins for one email within 15
+minutes return 429 until the window passes (in-memory, per process).
+`GET /api/auth/config` tells the page which sign-in options to show.
+
+Set `LIFE_INBOX_AUTH_MODE=password` with `LIFE_INBOX_ENV=beta` for a public
+deployment: anonymous visitors see only the sign-in form, and every account
+gets its own private inbox.
+
+## Sign in with Google
+
+Off until both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; then a
+**Continue with Google** button appears on the sign-in screen.
+
+1. In Google Cloud Console → APIs & Services → Credentials, create an
+   **OAuth client ID** of type **Web application**.
+2. Add the authorized redirect URI
+   `https://<your-service>.onrender.com/api/auth/google/callback`.
+3. On the OAuth consent screen, add the `openid`, `email` and `profile`
+   scopes. While the app is in "Testing", only listed test users can sign in;
+   publish it to let anyone with a Google account sign in.
+4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and (recommended)
+   `GOOGLE_REDIRECT_URI` to that same callback URL in the service's
+   environment. Never commit them.
+
+Only Google accounts with a verified email are accepted. Signing in with
+Google uses the existing account with that email, if there is one.
+
+## Render (web service + Postgres)
+
+| Setting | Value |
+| --- | --- |
+| Runtime | Python, `PYTHON_VERSION=3.12.10` |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"` |
+| Health check path | `/api/health` |
+
+Environment: `LIFE_INBOX_ENV=beta`, `LIFE_INBOX_AUTH_MODE=password`,
+`LIFE_INBOX_ALLOW_DEV_LOGIN=0`, a random 32+ character
+`LIFE_INBOX_SESSION_SECRET`, `DATABASE_URL` set to the Render Postgres
+internal URL (a `postgres://` URL is converted to `postgresql+psycopg://`
+automatically), and `LIFE_INBOX_UPLOAD_DIR=/tmp/life_inbox_uploads`.
+
+Without a persistent disk, uploaded PDF, image and audio files are lost
+when the service restarts or redeploys. Their extracted text stays in
+Postgres. Attach a Render disk and point `LIFE_INBOX_UPLOAD_DIR` at it to
+keep the files.
+
 ## Migrations / backups / rollback
 
 - Alembic is the only schema owner: `alembic upgrade head`
@@ -103,7 +155,40 @@ stays SQLite-friendly for local teaching.
 
 ## What this milestone does **not** do
 
-- Real Google sign-in / OAuth consent
+- Real Google sign-in is available but stays off until OAuth credentials are set
 - Object storage (S3) wiring
-- Public internet deployment
+- Public internet deployment is documented for Render above; nothing deploys automatically
 - Purchases or paid managed services
+
+## Settings: bring-your-own AI and Google Calendar
+
+The gear button in the top bar opens **Settings**.
+
+**AI provider.** Each user can pick Claude, ChatGPT, Gemini, OpenRouter,
+Groq, Ollama or any OpenAI-compatible server, with its base URL, model and
+API key. Claude is called through Anthropic's SDK; the others through the
+OpenAI SDK's Chat Completions at the given base URL. Keys are encrypted with
+Fernet (key from `LIFE_INBOX_ENCRYPTION_KEY`, or derived from
+`LIFE_INBOX_SESSION_SECRET`) and only a last-four hint is ever shown. On the
+hosted site, base URLs must be public `https://` addresses; Ollama on
+`localhost` only works when the app runs locally. A failed or refused AI call
+falls back to the built-in rules. A user's setting takes priority over the
+server's `OPENAI_API_KEY`.
+
+**Google Calendar.** Uses the same OAuth client as Google sign-in. In Google
+Cloud Console for that client:
+
+1. Enable the **Google Calendar API**.
+2. Add the authorized redirect URI
+   `https://<your-service>.onrender.com/api/integrations/google-calendar/callback`
+   (in addition to the sign-in callback).
+3. On the OAuth consent screen, add the scope
+   `https://www.googleapis.com/auth/calendar.events`. It is a sensitive
+   scope: while the app is in Testing, only listed test users can connect;
+   publishing for everyone requires Google's verification.
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the service. Users then
+choose **Connect Google Calendar**, and each dated task's calendar preview
+shows **Add to Google Calendar**; an all-day event is created only after that
+explicit confirm. Tokens are stored encrypted per user; **Disconnect**
+revokes them.

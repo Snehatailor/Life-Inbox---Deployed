@@ -1,0 +1,50 @@
+# Render Blueprint: one free Python web service + one free Postgres database.
+# See docs/deployment.md for what each setting does.
+databases:
+  - name: life-inbox-db
+    plan: free
+    region: singapore
+    postgresMajorVersion: "16"
+    databaseName: life_inbox_db
+    user: life_inbox_db_user
+
+services:
+  - type: web
+    name: life-inbox
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DATABASE_URL
+        fromDatabase:
+          name: life-inbox-db
+          property: connectionString
+      - key: LIFE_INBOX_SESSION_SECRET
+        generateValue: true
+      - key: LIFE_INBOX_ENV
+        value: beta
+      - key: LIFE_INBOX_AUTH_MODE
+        value: password
+      - key: LIFE_INBOX_ALLOW_DEV_LOGIN
+        value: "0"
+      - key: LIFE_INBOX_UPLOAD_DIR
+        value: /tmp/life_inbox_uploads
+      - key: LIFE_INBOX_CALENDAR_PROVIDER
+        value: mock
+      - key: LIFE_INBOX_TIMEZONE
+        value: Asia/Kolkata
+      # Optional. Set these in the Render dashboard to turn on
+      # "Continue with Google"; leave unset to keep it hidden.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false

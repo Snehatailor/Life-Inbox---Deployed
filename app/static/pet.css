@@ -60,3 +60,9 @@
 .pb-actions button:disabled { opacity: .55; cursor: default; }
 .pet-bubble:has(.pb-actions) { max-width: 260px; }
 .pp-later { padding: 4px 8px !important; }
+
+/* Sign-in inside the pet (desktop app on the hosted site). */
+.pp-signin-lede { margin: 0 0 8px; font-size: 12.5px; line-height: 1.4; opacity: 0.9; }
+.pp-email, .pp-password { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; border-radius: 9px; border: 1px solid #3a4452; background: #121a24; color: #e6eaf0; font: inherit; }
+.pp-signin-status { min-height: 1em; margin: 6px 0 0; font-size: 12px; }
+.pp-tabs[hidden] { display: none; }

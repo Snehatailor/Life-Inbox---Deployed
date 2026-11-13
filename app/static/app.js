@@ -1306,30 +1306,48 @@ async function previewCalendarForTask(task) {
       `<div>${esc(preview.title)} · ${esc(preview.start_date)} (${esc(preview.timezone)})</div>`,
       `<div class="provenance">${(preview.notes || []).map(note => esc(note)).join(' · ')}</div>`
     ].join('');
-    const confirmBtn = actionButton('Confirm (mock only)', '', async () => {
+    const isGoogle = preview.provider === 'google' && preview.draft_id.startsWith('gcal-') && !preview.draft_id.startsWith('gcal-preview-');
+    const confirmBtn = actionButton(isGoogle ? 'Add to Google Calendar' : 'Confirm (mock only)', '', async () => {
+      confirmBtn.disabled = true;
       try {
-        const confirmed = await fetchJson(
-          '/api/calendar/confirm',
-          {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({draft_id: preview.draft_id})
-          },
-          'Unable to confirm calendar action.'
-        );
-        setStatus(
-          'calendarStatus',
-          confirmed.status === 'confirmed_mock'
-            ? 'Mock calendar confirmation recorded. No external event created.'
-            : `Calendar action status: ${confirmed.status}`
-        );
-        root.innerHTML += `<div class="provenance"><span class="label">Receipt</span>: ${esc(confirmed.status)} / ${esc(confirmed.provider)}</div>`;
+        const confirmed = await requestJson('/api/calendar/confirm', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({draft_id: preview.draft_id})
+        });
+        confirmBtn.remove();
+        if (confirmed.status === 'created') {
+          setStatus('calendarStatus', 'Added to your Google Calendar.');
+          if (confirmed.link && /^https:\/\/(www\.)?(calendar\.)?google\.com\//.test(confirmed.link)) {
+            const link = document.createElement('a');
+            link.href = confirmed.link;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'Open in Google Calendar';
+            link.className = 'button-link small';
+            root.appendChild(link);
+          }
+        } else {
+          setStatus(
+            'calendarStatus',
+            confirmed.status === 'confirmed_mock'
+              ? 'Mock calendar confirmation recorded. Connect Google Calendar in Settings to add real events.'
+              : `Calendar action status: ${confirmed.status}`
+          );
+          root.innerHTML += `<div class="provenance"><span class="label">Receipt</span>: ${esc(confirmed.status)} / ${esc(confirmed.provider)}</div>`;
+        }
       } catch (error) {
+        confirmBtn.disabled = false;
         setStatus('calendarStatus', error.message || 'Calendar confirm blocked or failed.', true);
       }
     });
     root.appendChild(confirmBtn);
-    setStatus('calendarStatus', 'Preview ready — confirm explicitly to record a mock receipt.');
+    setStatus(
+      'calendarStatus',
+      isGoogle
+        ? 'Check the details, then add it to your Google Calendar.'
+        : 'Preview ready — confirm explicitly to record a mock receipt.'
+    );
   } catch (error) {
     setStatus('calendarStatus', error.message || 'Calendar preview failed.', true);
   }
@@ -1382,13 +1400,78 @@ function goToCalendarToday() {
   renderCalendar();
 }
 
+// ---------- Sign-in gate ----------
+// Until someone is signed in, a full-screen sign-in card covers the app. After
+// signing in or out the page reloads so every screen loads for the right person.
+let authConfig = {allow_dev_login: false, anonymous_local_owner: false, google_login: false};
+let authMode = 'login';
+let currentUser = null;
+
+async function loadAuthConfig() {
+  try {
+    authConfig = await fetchJson('/api/auth/config', {}, 'Unable to load sign-in options.');
+  } catch {
+    // Keep safe defaults: password sign-in only.
+  }
+}
+
+function applyAuthState() {
+  const signedInAccount = Boolean(currentUser) && currentUser.auth_provider !== 'local';
+  const canUseApp = Boolean(currentUser);
+  const authUser = document.getElementById('authUser');
+  authUser.textContent = currentUser ? currentUser.display_name : 'Not signed in';
+  authUser.title = currentUser ? `Signed in as ${currentUser.email}` : '';
+  document.getElementById('authGate').hidden = canUseApp;
+  document.querySelector('.app-shell').toggleAttribute('inert', !canUseApp);
+  document.getElementById('signOutButton').hidden = !signedInAccount;
+  document.getElementById('googleLogin').hidden = !authConfig.google_login;
+  document.getElementById('devLoginForm').hidden = !authConfig.allow_dev_login;
+  document.body.classList.toggle('signed-out', !canUseApp);
+}
+
 async function loadAuthUser() {
   try {
-    const user = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
-    document.getElementById('authUser').textContent =
-      `Signed in as ${user.display_name} <${user.email}> (${user.auth_provider})`;
+    currentUser = await fetchJson('/api/auth/me', {}, 'Unable to load session.');
   } catch {
-    document.getElementById('authUser').textContent = 'Not signed in';
+    currentUser = null;
+  }
+  applyAuthState();
+  return currentUser;
+}
+
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  const registering = authMode === 'register';
+  document.getElementById('authSubmit').textContent = registering ? 'Create account' : 'Sign in';
+  document.getElementById('authTitle').textContent = registering ? 'Create your account' : 'Sign in';
+  document.getElementById('authModeToggle').textContent = registering
+    ? 'I already have an account'
+    : 'Create an account';
+  document.getElementById('authNameLabel').hidden = !registering;
+  document.getElementById('authPassword').autocomplete = registering ? 'new-password' : 'current-password';
+  setStatus('authStatus', '');
+}
+
+async function passwordAuth(event) {
+  event.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return;
+  const registering = authMode === 'register';
+  const body = registering
+    ? {email, password, display_name: document.getElementById('authName').value.trim()}
+    : {email, password};
+  setButtonBusy('authSubmit', true, registering ? 'Creating…' : 'Signing in…', registering ? 'Create account' : 'Sign in');
+  try {
+    await requestJson(registering ? '/api/auth/register' : '/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    location.reload();
+  } catch (error) {
+    setStatus('authStatus', error.message || 'Sign-in failed.', true);
+    setButtonBusy('authSubmit', false, '', registering ? 'Create account' : 'Sign in');
   }
 }
 
@@ -1397,22 +1480,12 @@ async function devLogin(event) {
   const email = document.getElementById('devLoginEmail').value.trim();
   if (!email) return;
   try {
-    const user = await fetchJson(
-      '/api/auth/dev-login',
-      {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email})
-      },
-      'Unable to sign in.'
-    );
-    setStatus('authStatus', `Signed in as ${user.email}`);
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-      await loadCalendar();
+    await requestJson('/api/auth/dev-login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email})
+    });
+    location.reload();
   } catch {
     setStatus('authStatus', 'Sign-in failed (dev login may be disabled).', true);
   }
@@ -1421,21 +1494,42 @@ async function devLogin(event) {
 async function logoutSession() {
   try {
     await fetchJson('/api/auth/logout', {method: 'POST'}, 'Unable to sign out.');
-    setStatus('authStatus', 'Signed out.');
-    await loadAuthUser();
-    await loadLatestAnalysis();
-    await loadNotes();
-    await loadTasks();
-    await loadAttention();
-      await loadCalendar();
-  } catch {
-    setStatus('authStatus', 'Sign-out failed.', true);
+  } finally {
+    location.reload();
   }
 }
 
 const weeklyTypeLabels = {
   text: 'notes', url: 'links', pdf: 'PDFs', image: 'images', voice: 'voice notes'
 };
+
+// Weekly stats card: goal-day dots, tasks by priority, best day, streak, habits.
+function weeklyStatsHtml(stats) {
+  if (!stats) return '';
+  const dots = stats.week_days.map(day => {
+    const label = `${day.weekday} ${day.day}: ${day.points} points${day.goal_met ? ' · goal met' : ''}`;
+    return `<span class="week-dot${day.goal_met ? ' met' : ''}${day.points && !day.goal_met ? ' some' : ''}" title="${esc(label)}" aria-label="${esc(label)}"><span>${esc(day.weekday.slice(0, 1))}</span></span>`;
+  }).join('');
+  const byPriority = stats.done_by_priority;
+  const best = stats.best_day
+    ? `${esc(stats.best_day.weekday)} · ${stats.best_day.points} pts`
+    : 'No points yet';
+  return [
+    '<div class="week-stats" aria-label="Weekly stats">',
+    '<div class="week-stats-goal">',
+    `<div class="week-dots">${dots}</div>`,
+    `<p class="week-stats-big">${stats.goal_days}<span>/7</span></p>`,
+    `<p class="muted">days with ${stats.goal} points</p>`,
+    '</div>',
+    '<dl class="week-stats-list">',
+    `<div><dt>Done</dt><dd><span class="prio-count high">${byPriority.High} High</span> <span class="prio-count medium">${byPriority.Medium} Medium</span> <span class="prio-count low">${byPriority.Low} Low</span></dd></div>`,
+    `<div><dt>Best day</dt><dd>${best}</dd></div>`,
+    `<div><dt>Streak</dt><dd>${stats.streak ? `🔥 ${stats.streak} day${stats.streak === 1 ? '' : 's'}` : 'Not started'}</dd></div>`,
+    `<div><dt>Habits kept</dt><dd>↻ ${stats.habits_kept}</dd></div>`,
+    '</dl>',
+    '</div>'
+  ].join('');
+}
 
 function renderWeeklyReview(review) {
   const root = document.getElementById('weeklyReview');
@@ -1452,6 +1546,7 @@ function renderWeeklyReview(review) {
   root.innerHTML = [
     `<p class="week-summary">${esc(review.summary)}</p>`,
     `<p class="muted week-summary-kind">${summaryLabel}</p>`,
+    weeklyStatsHtml(review.stats),
     '<div class="week-grid">',
     `<div class="week-card"><h3>📥 Captured</h3><p class="week-number">${review.captured.total}</p>`,
     `<p class="muted">${byType || 'Nothing new this week.'}</p></div>`,
@@ -1819,7 +1914,8 @@ async function completeTask(task, row) {
     const done = await taskAction(`/api/tasks/${task.id}/complete`, undefined, 'Unable to complete task.');
     await new Promise(resolve => setTimeout(resolve, 300));
     const rescued = done && done.rescue_bonus ? ` · +${done.rescue_bonus} rescue bonus! You beat the procrastination on this one.` : '';
-    showToast(`Done: ${task.text}${rescued}`, {
+    const next = done && done.next_due_on ? ` · ↻ Next one ${relativeDueLabel(done.next_due_on).toLowerCase()} (${done.next_due_on})` : '';
+    showToast(`Done: ${task.text}${rescued}${next}`, {
       actionLabel: 'Undo',
       onAction: async () => {
         await taskAction(`/api/tasks/${task.id}/reopen`, undefined, 'Unable to undo.');
@@ -1884,6 +1980,17 @@ async function patchTask(taskId, body, message) {
   }
 }
 
+const REPEAT_CHOICES = [
+  ['', 'Does not repeat'],
+  ['daily', 'Every day'],
+  ['weekdays', 'Weekdays (Mon–Fri)'],
+  ['weekly', 'Every week'],
+  ['days', 'Chosen days…']
+];
+const REPEAT_DAYS = [
+  ['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']
+];
+
 function openTaskEditor(task, row) {
   const form = h('form', 'task-edit');
   const text = h('input');
@@ -1913,11 +2020,36 @@ function openTaskEditor(task, row) {
     option.selected = task.domain_source === 'user' && task.domain === name;
     domain.append(option);
   }
-  for (const [label, control] of [['Priority', priority], ['Deadline', due], ['Section', domain]]) {
+  const repeat = h('select');
+  for (const [value, label] of REPEAT_CHOICES) {
+    const option = h('option', '', label);
+    option.value = value;
+    repeat.append(option);
+  }
+  const currentRule = task.repeat_rule || '';
+  const chosenDays = currentRule.startsWith('days:') ? currentRule.slice(5).split(',') : [];
+  repeat.value = currentRule.startsWith('days:') ? 'days' : currentRule;
+  for (const [label, control] of [['Priority', priority], ['Deadline', due], ['Section', domain], ['Repeat', repeat]]) {
     const wrap = h('label', '', label);
     wrap.append(control);
     grid.append(wrap);
   }
+  const dayPicker = h('div', 'repeat-days');
+  dayPicker.setAttribute('role', 'group');
+  dayPicker.setAttribute('aria-label', 'Repeat on these days');
+  for (const [code, label] of REPEAT_DAYS) {
+    const day = h('button', 'repeat-day', label);
+    day.type = 'button';
+    day.dataset.day = code;
+    day.setAttribute('aria-pressed', String(chosenDays.includes(code)));
+    day.addEventListener('click', () => {
+      day.setAttribute('aria-pressed', String(day.getAttribute('aria-pressed') !== 'true'));
+    });
+    dayPicker.append(day);
+  }
+  const syncDays = () => { dayPicker.hidden = repeat.value !== 'days'; };
+  repeat.addEventListener('change', syncDays);
+  syncDays();
   const buttons = h('div', 'task-actions');
   const save = h('button', '', 'Save');
   save.type = 'submit';
@@ -1925,7 +2057,7 @@ function openTaskEditor(task, row) {
   cancel.type = 'button';
   cancel.addEventListener('click', () => refreshAll());
   buttons.append(save, cancel);
-  form.append(text, grid, buttons);
+  form.append(text, grid, dayPicker, buttons);
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -1936,6 +2068,16 @@ function openTaskEditor(task, row) {
     const wanted = domain.value || null;
     const current = task.domain_source === 'user' ? task.domain : null;
     if (wanted !== current) body.domain = wanted;
+    let wantedRule = repeat.value;
+    if (wantedRule === 'days') {
+      const days = [...dayPicker.querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.day);
+      if (!days.length) {
+        showToast('Pick at least one day to repeat on.');
+        return;
+      }
+      wantedRule = `days:${days.join(',')}`;
+    }
+    if ((wantedRule || null) !== (task.repeat_rule || null)) body.repeat_rule = wantedRule || null;
     if (!Object.keys(body).length) {
       await refreshAll();
       return;
@@ -1970,6 +2112,11 @@ function rowBadges(task) {
   if (task.radar) wrap.append(radarBadge(task.radar));
   if (isSnoozed(task)) wrap.append(h('span', 'pill snoozed-pill', `Snoozed until ${task.snoozed_until}`));
   if (task.slot_start) wrap.append(h('span', 'pill slot-pill', `🕘 ${formatSlot(task.slot_start, task.slot_end)}`));
+  if (task.repeat_label) {
+    const repeatBadge = h('span', 'pill repeat-pill', `↻ ${task.repeat_label}`);
+    repeatBadge.title = `Repeats: ${task.repeat_label}. Completing it creates the next one.`;
+    wrap.append(repeatBadge);
+  }
   return wrap;
 }
 
@@ -2521,7 +2668,17 @@ setUpCaptureBox();
 showSkeleton('tasksList', 2);
 
 syncControlsFromUrl();
-loadAuthUser();
+loadAuthConfig().then(loadAuthUser).then(user => {
+  if (user) {
+    handleSettingsRedirect();
+    loadDesktopPet().then(() => {
+      renderGetPetButton();
+      if (!location.search.includes('calendar=')) openWelcome(false);
+    });
+  } else {
+    showRedirectAuthError();
+  }
+});
 refreshAll();
 loadSearch();
 loadLatestAnalysis();
@@ -3218,3 +3375,406 @@ async function syncInPagePet(known) {
   } catch { /* the pet is optional */ }
 }
 syncInPagePet();
+
+// ---------- Shared: JSON requests that keep the server's error message ----------
+
+async function requestJson(url, options = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch {
+    throw new Error('Could not reach the server.');
+  }
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    throw new Error(data && typeof data.detail === 'string' ? data.detail : 'Something went wrong.');
+  }
+  return data;
+}
+
+function showRedirectAuthError() {
+  // Google sign-in sends errors back as ?auth_error=...; show once, then tidy the URL.
+  const params = new URLSearchParams(location.search);
+  const message = params.get('auth_error');
+  if (!message) return;
+  setStatus('authStatus', message.slice(0, 200), true);
+  params.delete('auth_error');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + location.hash);
+}
+
+// ---------- Settings sheet: AI provider + Google Calendar ----------
+
+let settingsState = null;
+
+function presetById(id) {
+  return (settingsState?.presets || []).find(preset => preset.id === id) || null;
+}
+
+function renderAiSettings() {
+  const ai = settingsState.ai;
+  const select = document.getElementById('aiProvider');
+  if (!select.options.length) {
+    select.add(new Option('Built-in rules (no AI)', ''));
+    for (const preset of settingsState.presets) select.add(new Option(preset.label, preset.id));
+  }
+  select.value = ai.provider || '';
+  document.getElementById('aiBaseUrl').value = ai.base_url || '';
+  document.getElementById('aiModel').value = ai.model || '';
+  document.getElementById('aiApiKey').value = '';
+  document.getElementById('aiApiKey').placeholder = ai.has_key
+    ? `Saved key ${ai.key_hint || ''} · paste a new one to replace it`
+    : 'Paste your API key';
+  const active = ai.active || {};
+  const badge = document.getElementById('aiActive');
+  badge.textContent = active.source === 'none' ? 'Built-in rules' : (active.model || active.label);
+  badge.classList.toggle('on', active.source !== 'none');
+  document.getElementById('aiRemoveButton').hidden = !ai.provider;
+  document.getElementById('aiTestButton').hidden = !ai.provider;
+  updateAiFieldVisibility();
+}
+
+function updateAiFieldVisibility() {
+  const preset = presetById(document.getElementById('aiProvider').value);
+  for (const fieldId of ['aiBaseUrl', 'aiModel', 'aiApiKey']) {
+    document.getElementById(fieldId).closest('.field').hidden = !preset;
+  }
+  document.getElementById('aiKeyHelp').textContent = preset
+    ? preset.key_help
+    : 'Life Inbox works without AI using built-in rules. Pick a provider to use your own model.';
+  document.getElementById('aiSaveButton').textContent = preset ? 'Save' : 'Use built-in rules';
+}
+
+function onAiProviderChange() {
+  const preset = presetById(document.getElementById('aiProvider').value);
+  if (preset) {
+    document.getElementById('aiBaseUrl').value = preset.base_url;
+    document.getElementById('aiModel').value = preset.model;
+  }
+  setStatus('aiSettingsStatus', '');
+  updateAiFieldVisibility();
+}
+
+function renderCalendarSettings() {
+  const calendar = settingsState.calendar;
+  const badge = document.getElementById('calendarBadge');
+  const connect = document.getElementById('calendarConnect');
+  const disconnect = document.getElementById('calendarDisconnect');
+  if (!calendar.available) {
+    badge.textContent = 'Not set up';
+    badge.classList.remove('on');
+    connect.hidden = true;
+    disconnect.hidden = true;
+    setStatus('calendarSettingsStatus', 'The site owner needs to add a Google OAuth client before calendars can be connected. Until then, “Add to Google Calendar” links and the .ics download still work.');
+    return;
+  }
+  badge.textContent = calendar.connected ? 'Connected' : 'Not connected';
+  badge.classList.toggle('on', calendar.connected);
+  connect.hidden = calendar.connected;
+  disconnect.hidden = !calendar.connected;
+  if (calendar.connected) {
+    setStatus('calendarSettingsStatus', `Connected as ${calendar.email || 'your Google account'}. Confirmed tasks are added to your calendar.`);
+  }
+}
+
+function renderAccountSettings() {
+  const signedIn = Boolean(currentUser) && currentUser.auth_provider !== 'local';
+  document.getElementById('settingsAccountName').textContent = currentUser ? currentUser.display_name : 'Not signed in';
+  document.getElementById('settingsAccountEmail').textContent = signedIn
+    ? currentUser.email
+    : 'Life Inbox is running on this computer without an account.';
+  document.getElementById('settingsSignOut').hidden = !signedIn;
+}
+
+async function loadSettings() {
+  renderAccountSettings();
+  settingsState = await requestJson('/api/settings');
+  renderAiSettings();
+  renderCalendarSettings();
+  refreshDemoStatus();
+}
+
+async function openSettings() {
+  const dialog = document.getElementById('settingsDialog');
+  const menu = document.querySelector('details.account');
+  if (menu) menu.open = false;
+  if (!dialog.open) dialog.showModal();
+  try {
+    await loadSettings();
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  }
+}
+
+function closeSettings() {
+  document.getElementById('settingsDialog').close();
+}
+
+async function saveAiSettings(event) {
+  event.preventDefault();
+  const provider = document.getElementById('aiProvider').value;
+  setButtonBusy('aiSaveButton', true, 'Saving…', 'Save');
+  try {
+    if (!provider) {
+      settingsState.ai = await requestJson('/api/settings/ai', {method: 'DELETE'});
+      setStatus('aiSettingsStatus', 'Using built-in rules. No AI provider is called.');
+    } else {
+      const body = {
+        provider,
+        base_url: document.getElementById('aiBaseUrl').value.trim(),
+        model: document.getElementById('aiModel').value.trim(),
+      };
+      const key = document.getElementById('aiApiKey').value.trim();
+      if (key) body.api_key = key;
+      settingsState.ai = await requestJson('/api/settings/ai', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      setStatus('aiSettingsStatus', 'Saved. Use “Test connection” to check it.');
+    }
+    renderAiSettings();
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  } finally {
+    setButtonBusy('aiSaveButton', false, 'Saving…', document.getElementById('aiProvider').value ? 'Save' : 'Use built-in rules');
+  }
+}
+
+async function testAiSettings() {
+  setButtonBusy('aiTestButton', true, 'Testing…', 'Test connection');
+  setStatus('aiSettingsStatus', 'Sending a tiny test message…');
+  try {
+    const result = await requestJson('/api/settings/ai/test', {method: 'POST'});
+    setStatus('aiSettingsStatus', result.message, !result.ok);
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  } finally {
+    setButtonBusy('aiTestButton', false, 'Testing…', 'Test connection');
+  }
+}
+
+async function removeAiSettings() {
+  try {
+    settingsState.ai = await requestJson('/api/settings/ai', {method: 'DELETE'});
+    renderAiSettings();
+    setStatus('aiSettingsStatus', 'Removed. Life Inbox is back on built-in rules.');
+  } catch (error) {
+    setStatus('aiSettingsStatus', error.message, true);
+  }
+}
+
+async function disconnectCalendar() {
+  try {
+    settingsState.calendar = await requestJson('/api/integrations/google-calendar/disconnect', {method: 'POST'});
+    renderCalendarSettings();
+    setStatus('calendarSettingsStatus', 'Disconnected. Life Inbox no longer has access to your calendar.');
+    if (typeof loadGcalStatus === 'function') loadGcalStatus();
+  } catch (error) {
+    setStatus('calendarSettingsStatus', error.message, true);
+  }
+}
+
+function handleSettingsRedirect() {
+  // Google sends people back with ?calendar=connected|error[&calendar_message=…]#settings
+  const params = new URLSearchParams(location.search);
+  const result = params.get('calendar');
+  const wantsSettings = location.hash === '#settings' || Boolean(result);
+  if (!wantsSettings) return;
+  params.delete('calendar');
+  const message = params.get('calendar_message');
+  params.delete('calendar_message');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + '#today');
+  openSettings().then(() => {
+    if (result === 'connected') {
+      setStatus('calendarSettingsStatus', 'Google Calendar connected. Confirmed tasks are added to your calendar.');
+      if (typeof loadGcalStatus === 'function') loadGcalStatus();
+    } else if (result === 'error') {
+      setStatus('calendarSettingsStatus', (message || 'Could not connect Google Calendar.').slice(0, 200), true);
+    }
+  });
+}
+
+// ---------- Desktop pet on/off (only when Life Inbox runs on this computer) ----------
+
+let desktopPetState = null;
+
+function renderDesktopPet() {
+  const toggle = document.getElementById('desktopPetToggle');
+  if (!desktopPetState || !desktopPetState.available) {
+    toggle.hidden = true;
+    return;
+  }
+  toggle.hidden = false;
+  // The switch shows what you see: on only while the pet is actually running.
+  const on = Boolean(desktopPetState.enabled && desktopPetState.running);
+  toggle.setAttribute('aria-checked', String(on));
+  toggle.title = on
+    ? 'The pet is on your screen. Click to send it to sleep.'
+    : 'Click to bring the pet onto your screen.';
+}
+
+async function loadDesktopPet() {
+  try {
+    desktopPetState = await requestJson('/api/desktop-pet');
+  } catch {
+    desktopPetState = null;
+  }
+  renderDesktopPet();
+}
+
+async function toggleDesktopPet() {
+  if (!desktopPetState) return;
+  const turnOn = !(desktopPetState.enabled && desktopPetState.running);
+  const toggle = document.getElementById('desktopPetToggle');
+  toggle.disabled = true;
+  setStatus('desktopPetStatus', turnOn ? 'Waking the pet…' : 'Sending the pet to sleep…');
+  try {
+    desktopPetState = await requestJson('/api/desktop-pet', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: turnOn})
+    });
+    setStatus('desktopPetStatus', turnOn ? 'The pet is on your screen.' : 'The pet is off.');
+  } catch (error) {
+    await loadDesktopPet();
+    setStatus('desktopPetStatus', error.message, true);
+  } finally {
+    toggle.disabled = false;
+    renderDesktopPet();
+  }
+}
+
+// ---------- Demo data ----------
+
+async function refreshDemoStatus() {
+  try {
+    const status = await requestJson('/api/demo');
+    const badge = document.getElementById('demoBadge');
+    badge.textContent = status.loaded ? 'Loaded' : 'Not loaded';
+    badge.classList.toggle('on', status.loaded);
+    document.getElementById('demoLoadButton').hidden = status.loaded;
+    document.getElementById('demoRemoveButton').hidden = !status.loaded;
+    return status;
+  } catch {
+    return null;
+  }
+}
+
+async function loadDemoData(fromWelcome = false) {
+  const statusId = fromWelcome ? 'welcomeDemoStatus' : 'demoStatus';
+  const buttonId = fromWelcome ? 'welcomeDemoButton' : 'demoLoadButton';
+  setButtonBusy(buttonId, true, 'Loading…', 'Load demo data');
+  setStatus(statusId, 'Adding samples for every feature…');
+  try {
+    await requestJson('/api/demo', {method: 'POST'});
+    setStatus(statusId, 'Demo data loaded. Refreshing…');
+    rememberWelcomeSeen();
+    setTimeout(() => location.reload(), 600);
+  } catch (error) {
+    setStatus(statusId, error.message, true);
+    setButtonBusy(buttonId, false, 'Loading…', 'Load demo data');
+  }
+}
+
+async function removeDemoData() {
+  setButtonBusy('demoRemoveButton', true, 'Removing…', 'Remove demo data');
+  try {
+    await requestJson('/api/demo', {method: 'DELETE'});
+    setStatus('demoStatus', 'Demo data removed. Refreshing…');
+    setTimeout(() => location.reload(), 600);
+  } catch (error) {
+    setStatus('demoStatus', error.message, true);
+    setButtonBusy('demoRemoveButton', false, 'Removing…', 'Remove demo data');
+  }
+}
+
+// ---------- Welcome popup: desktop pet download + demo data ----------
+
+const PET_RELEASES = 'https://github.com/Snehatailor/life-inbox-pet/releases/latest/download/';
+const PET_FILES = {
+  winX64: 'Life-Inbox-Pet-Setup-x64.exe',
+  winArm: 'Life-Inbox-Pet-Setup-arm64.exe',
+  mac: 'Life-Inbox-Pet-mac.dmg',
+  linux: 'Life-Inbox-Pet-linux-x86_64.AppImage'
+};
+
+async function detectPetDownload() {
+  const ua = navigator.userAgent || '';
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) return {key: 'mac', label: 'Download for Mac'};
+  if (/Linux/i.test(platform) && !/Android/i.test(ua)) return {key: 'linux', label: 'Download for Linux'};
+  if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+    let arm = false;
+    try {
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        const values = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+        arm = values.architecture === 'arm';
+      }
+    } catch { /* keep x64 */ }
+    return arm
+      ? {key: 'winArm', label: 'Download for Windows (ARM)'}
+      : {key: 'winX64', label: 'Download for Windows'};
+  }
+  return null;
+}
+
+function welcomeKey() {
+  return `lifeInbox.welcomeSeen.${currentUser ? currentUser.id : 'anon'}`;
+}
+
+function rememberWelcomeSeen() {
+  try { localStorage.setItem(welcomeKey(), '1'); } catch { /* private mode */ }
+}
+
+function welcomeAlreadySeen() {
+  try { return localStorage.getItem(welcomeKey()) === '1'; } catch { return false; }
+}
+
+async function openWelcome(force = false) {
+  const menu = document.querySelector('details.account');
+  if (menu) menu.open = false;
+  const hosted = !(desktopPetState && desktopPetState.available);
+  const demo = await refreshDemoStatus();
+  let inboxEmpty = false;
+  try { inboxEmpty = (await requestJson('/api/items')).length === 0; } catch { /* ignore */ }
+  const showDemo = Boolean(demo && !demo.loaded && (inboxEmpty || force));
+  document.getElementById('welcomePet').hidden = !hosted;
+  document.getElementById('welcomeDemo').hidden = !showDemo;
+  if (!hosted && !showDemo) return;
+  if (!force && welcomeAlreadySeen()) return;
+
+  for (const [id, key] of [['petDlWinX64', 'winX64'], ['petDlWinArm', 'winArm'], ['petDlMac', 'mac'], ['petDlLinux', 'linux']]) {
+    document.getElementById(id).href = PET_RELEASES + PET_FILES[key];
+  }
+  const primary = document.getElementById('petDownloadPrimary');
+  const detected = await detectPetDownload();
+  if (detected) {
+    primary.href = PET_RELEASES + PET_FILES[detected.key];
+    primary.textContent = detected.label;
+    primary.hidden = false;
+    document.getElementById('petDownloadHint').textContent = '';
+  } else {
+    primary.hidden = true;
+    document.getElementById('petDownloadHint').textContent = 'The desktop pet runs on Windows, Mac and Linux computers.';
+  }
+  primary.onclick = rememberWelcomeSeen;
+  const dialog = document.getElementById('welcomeDialog');
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeWelcome() {
+  rememberWelcomeSeen();
+  document.getElementById('welcomeDialog').close();
+}
+
+function renderGetPetButton() {
+  const hosted = !(desktopPetState && desktopPetState.available);
+  document.getElementById('getPetButton').hidden = !hosted;
+}

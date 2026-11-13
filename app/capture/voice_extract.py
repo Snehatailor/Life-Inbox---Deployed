@@ -146,22 +146,33 @@ def transcribe_audio(
             "note": "Transcription disabled via LIFE_INBOX_DISABLE_TRANSCRIPTION.",
         }
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    # A user who chose ChatGPT in Settings transcribes with their own key.
+    user_key = None
+    try:
+        from app.ai_provider import resolve_ai_config
+
+        ai_config = resolve_ai_config()
+        if ai_config and ai_config.source == "user" and ai_config.provider == "openai":
+            user_key = ai_config.api_key
+    except Exception:
+        user_key = None
+
+    api_key = user_key or os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return {
             "text": "",
             "provider": "none",
             "available": False,
             "note": (
-                "Transcription not configured. Set OPENAI_API_KEY for live "
-                "transcription, or edit the transcript manually."
+                "Transcription not configured. Choose ChatGPT in Settings "
+                "for automatic transcripts, or type the transcript yourself."
             ),
         }
 
     try:
         from openai import OpenAI
 
-        client = OpenAI()
+        client = OpenAI(api_key=user_key) if user_key else OpenAI()
         model = _transcription_model()
         safe_name = _normalize_filename(original_filename)
         result = client.audio.transcriptions.create(

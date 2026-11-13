@@ -1,0 +1,69 @@
+name: Build installers
+
+# Push a tag like v1.0.1 (or run it by hand) to build every installer and
+# publish them together as one GitHub release. The Life Inbox site links to
+# releases/latest/download/<file>, so file names never change.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            build: npx electron-builder --win --x64 --publish never && npx electron-builder --win --arm64 --publish never
+          - os: macos-latest
+            build: npx electron-builder --mac --publish never
+          - os: ubuntu-latest
+            build: npx electron-builder --linux --publish never
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: ${{ matrix.build }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - run: ls -la installers
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest-build' }}
+          name: Life Inbox Pet ${{ github.ref_type == 'tag' && github.ref_name || 'latest build' }}
+          make_latest: true
+          files: installers/*
+          body: |
+            Desktop companion for Life Inbox.
+
+            - Windows: Life-Inbox-Pet-Setup-x64.exe (most PCs) or -arm64.exe (Snapdragon / ARM PCs)
+            - Mac: Life-Inbox-Pet-mac.dmg (Intel and Apple Silicon)
+            - Linux: Life-Inbox-Pet-linux-x86_64.AppImage
+
+            The installers are not code-signed yet: Windows may show "Windows protected your PC" (choose More info, then Run anyway), and on a Mac right-click the app and choose Open the first time.

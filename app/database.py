@@ -26,9 +26,13 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.attention.dates import today_in_configured_tz
+from app.game.recurrence import describe as describe_repeat
+from app.game.recurrence import next_due as next_repeat_due
+from app.game.recurrence import normalize_rule as normalize_repeat_rule
 from app.game.gcal import google_event_url
 from app.sorting import DOMAINS, UNSORTED, detect_domain, detect_format
 from app.game.progress import build_game_summary
@@ -63,12 +67,15 @@ from app.capture.pipeline import (
     VOICE_ITEM_TYPE,
 )
 from app.capture.storage import delete_stored_file
+from app.config import normalize_database_url
 from app.similarity import find_item_relations
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "life_inbox.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DB_PATH}"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+DATABASE_URL = normalize_database_url(
+    os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+)
 AUTO_CREATE_TABLES = os.getenv(
     "LIFE_INBOX_AUTO_CREATE_TABLES", ""
 ).strip().lower() in {"1", "true", "yes"}
@@ -118,6 +125,8 @@ class UserRecord(Base):
     display_name = Column(Text, nullable=False)
     auth_provider = Column(Text, nullable=False)
     created_at = Column(Text, nullable=False)
+    # Only set for email + password accounts. Never returned to clients.
+    password_hash = Column(Text, nullable=True)
 
 
 class InboxItemRecord(Base):
@@ -265,8 +274,70 @@ class TaskRecord(Base):
     slot_start = Column(Text, nullable=True)
     slot_end = Column(Text, nullable=True)
     slot_set_at = Column(Text, nullable=True)
+    # Recurring tasks: the rule (daily, weekdays, weekly, days:mon,wed) and
+    # the copy made when this one was completed (reused, never duplicated).
+    repeat_rule = Column(Text, nullable=True)
+    next_task_id = Column(Integer, nullable=True)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
+
+
+class UserSettingsRecord(Base):
+    """One row per user. Secret columns hold encrypted text only."""
+
+    __tablename__ = "user_settings"
+
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    ai_provider = Column(Text, nullable=True)
+    ai_base_url = Column(Text, nullable=True)
+    ai_model = Column(Text, nullable=True)
+    ai_api_key_enc = Column(Text, nullable=True)
+    google_calendar_token_enc = Column(Text, nullable=True)
+    google_calendar_email = Column(Text, nullable=True)
+    demo_data_json = Column(Text, nullable=True)
+    updated_at = Column(Text, nullable=False)
+
+
+_SETTINGS_FIELDS = (
+    "ai_provider",
+    "ai_base_url",
+    "ai_model",
+    "ai_api_key_enc",
+    "google_calendar_token_enc",
+    "google_calendar_email",
+    "demo_data_json",
+)
+
+
+def get_user_settings(owner_user_id: int) -> dict:
+    """Raw settings for one user (secret columns still encrypted)."""
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            return {field: None for field in _SETTINGS_FIELDS}
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
+
+
+def update_user_settings(owner_user_id: int, **changes) -> dict:
+    """Set the given columns for one user; None clears a column."""
+    unknown = set(changes) - set(_SETTINGS_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown settings fields: {sorted(unknown)}")
+    with SessionLocal() as session:
+        row = session.get(UserSettingsRecord, owner_user_id)
+        if row is None:
+            row = UserSettingsRecord(
+                user_id=owner_user_id,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            session.add(row)
+        for field, value in changes.items():
+            setattr(row, field, value)
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return {field: getattr(row, field) for field in _SETTINGS_FIELDS}
 
 
 class ShopPurchaseRecord(Base):
@@ -455,6 +526,50 @@ def ensure_user(
             session.add(user)
             session.commit()
         return _user_to_dict(user)
+
+
+class UserAlreadyExistsError(ValueError):
+    """An account with this email already exists."""
+
+
+def create_password_user(
+    *,
+    email: str,
+    display_name: str,
+    password_hash: str,
+) -> dict:
+    cleaned = email.strip().lower()
+    with SessionLocal() as session:
+        existing = session.scalar(
+            select(UserRecord).where(UserRecord.email == cleaned)
+        )
+        if existing is not None:
+            raise UserAlreadyExistsError(cleaned)
+        user = UserRecord(
+            email=cleaned,
+            display_name=display_name.strip() or cleaned.split("@", 1)[0],
+            auth_provider="password",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            password_hash=password_hash,
+        )
+        session.add(user)
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise UserAlreadyExistsError(cleaned) from exc
+        return _user_to_dict(user)
+
+
+def get_password_login(email: str) -> Optional[tuple[dict, Optional[str]]]:
+    """Return (public user dict, password hash) for an email, or None."""
+    with SessionLocal() as session:
+        user = session.scalar(
+            select(UserRecord).where(UserRecord.email == email.strip().lower())
+        )
+        if user is None:
+            return None
+        return _user_to_dict(user), user.password_hash
 
 
 def get_or_create_default_owner_id() -> int:
@@ -1233,6 +1348,9 @@ def _task_to_dict(session, task: TaskRecord) -> dict:
             if task.due_on
             else None
         ),
+        "repeat_rule": task.repeat_rule,
+        "repeat_label": describe_repeat(task.repeat_rule),
+        "next_task_id": task.next_task_id,
         "completed_at": task.completed_at,
         "points_awarded": task.points_awarded,
         "binned_at": task.binned_at,
@@ -1419,6 +1537,8 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
                         created_at=now.isoformat(),
                     )
                 )
+                if task.repeat_rule:
+                    _ensure_next_occurrence(session, task, owner_id, today, now)
             elif task.status == "completed" and task_status != "completed":
                 # Reopening or dismissing takes the points back, so
                 # complete -> reopen -> complete cannot farm points.
@@ -1442,7 +1562,56 @@ def set_task_status(task_id: int, task_status: str) -> Optional[dict]:
         if _radar_applies(result):
             _attach_radar(session, owner_id, [result], _open_task_dicts(session, owner_id))
         result["rescue_bonus"] = bonus
+        if task.next_task_id:
+            following = _owned_task(session, task.next_task_id, owner_id)
+            result["next_due_on"] = following.due_on if following is not None else None
         return result
+
+
+def _ensure_next_occurrence(session, task: "TaskRecord", owner_id: int, today, now) -> None:
+    """Give a completed repeating task exactly one next copy.
+
+    Complete -> reopen -> complete finds the copy made the first time (via
+    next_task_id) and reuses it, so a series never gets duplicates.
+    """
+    from datetime import date as _date
+
+    if task.next_task_id and _owned_task(session, task.next_task_id, owner_id) is not None:
+        return
+    try:
+        current_due = _date.fromisoformat(task.due_on) if task.due_on else None
+    except ValueError:
+        current_due = None
+    due = next_repeat_due(task.repeat_rule, current_due, today).isoformat()
+    stamp = now.isoformat()
+    copy = TaskRecord(
+        text=task.text,
+        priority=task.priority,
+        priority_source=task.priority_source,
+        timing_text=due,
+        timing_confirmed=1,
+        due_on=due,
+        due_confidence="high",
+        status=TASK_OPEN,
+        dedup_key=hashlib.sha256(
+            f"repeat:{owner_id}:{task.id}:{due}:{stamp}".encode("utf-8")
+        ).hexdigest(),
+        owner_user_id=owner_id,
+        domain=task.domain,
+        domain_source=task.domain_source,
+        repeat_rule=task.repeat_rule,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    if task.domain is None:
+        # A task organized from a note gets its section from that note; keep
+        # the section on the copy, which has no source note of its own.
+        domain, _source = _task_domain(session, task, _task_source_ids(session, task.id))
+        if domain and domain != UNSORTED:
+            copy.domain, copy.domain_source = domain, "user"
+    session.add(copy)
+    session.flush()
+    task.next_task_id = copy.id
 
 
 def set_item_domain(item_id: int, domain: Optional[str]) -> Optional[dict]:
@@ -1527,11 +1696,16 @@ def update_task_fields(
     text: Optional[str] = None,
     domain: Optional[str] = None,
     set_domain: bool = False,
+    repeat_rule: Optional[str] = None,
+    set_repeat: bool = False,
 ) -> Optional[dict]:
-    """Edit an open task: wording, priority, deadline or section.
+    """Edit an open task: wording, priority, deadline, section or repeat.
 
     `domain=None` with `set_domain=True` clears a person's choice back to auto.
+    `repeat_rule=None` with `set_repeat=True` stops the series (copies stay).
     """
+    if set_repeat:
+        repeat_rule = normalize_repeat_rule(repeat_rule)
     if priority is not None and priority not in PRIORITY_POINTS:
         raise ValueError("Unknown priority")
     if due_on is not None:
@@ -1564,6 +1738,8 @@ def update_task_fields(
                 task.domain, task.domain_source = None, None
             else:
                 task.domain, task.domain_source = domain, "user"
+        if set_repeat:
+            task.repeat_rule = repeat_rule
         task.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
         return _task_to_dict(session, task)
@@ -2535,13 +2711,23 @@ def get_weekly_review(now: Optional[datetime] = None) -> dict:
         tasks = session.scalars(
             select(TaskRecord).where(TaskRecord.owner_user_id == owner_id)
         ).all()
-        # There is no completed_at column; a completed task's updated_at is
-        # the closest stored fact for when it was finished.
+        # completed_at records when a task was finished; tasks completed
+        # before that column existed fall back to their last update time.
+        completed_rows = [
+            task
+            for task in tasks
+            if task.status == TASK_COMPLETED
+            and in_window(task.completed_at or task.updated_at)
+        ]
         completed = [
             {"id": task.id, "text": task.text, "priority": task.priority}
-            for task in tasks
-            if task.status == TASK_COMPLETED and in_window(task.updated_at)
+            for task in completed_rows
         ]
+        done_by_priority = {"High": 0, "Medium": 0, "Low": 0}
+        for task in completed_rows:
+            if task.priority in done_by_priority:
+                done_by_priority[task.priority] += 1
+        habits_kept = sum(1 for task in completed_rows if task.repeat_rule)
         open_task_count = sum(1 for task in tasks if task.status == TASK_OPEN)
 
         insights = {}
@@ -2606,10 +2792,27 @@ def get_weekly_review(now: Optional[datetime] = None) -> dict:
             if item.id not in insights and item.id not in linked_item_ids
         ]
 
+    # Goal days, best day and streak reuse the daily ring's own numbers
+    # (point_events per day, same goal and streak rules), so they never disagree.
+    game = game_summary_from_db()
+    week_days = game["history"]
+    best = max(week_days, key=lambda entry: (entry["points"], entry["day"]), default=None)
+    stats = {
+        "done_by_priority": done_by_priority,
+        "week_days": week_days,
+        "goal": game["goal"],
+        "goal_days": sum(1 for entry in week_days if entry["goal_met"]),
+        "best_day": best if best and best["points"] > 0 else None,
+        "streak": game["streak"],
+        "habits_kept": habits_kept,
+        "points_this_week": sum(entry["points"] for entry in week_days),
+    }
+
     return {
         "since": since.isoformat(),
         "until": now.isoformat(),
         "days": WEEKLY_REVIEW_DAYS,
+        "stats": stats,
         "captured": {"total": len(items), "by_type": captured_by_type},
         "completed_tasks": completed,
         "open_task_count": open_task_count,

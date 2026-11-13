@@ -27,9 +27,11 @@ class CalendarEventDraft:
     description: str
     timezone_name: str
     provider: str
-    status: str = "preview"  # preview | confirmed_mock | blocked
+    status: str = "preview"  # preview | confirmed_mock | created | blocked
     confirmation_required: bool = True
     notes: list[str] = field(default_factory=list)
+    external_event_id: Optional[str] = None
+    external_link: Optional[str] = None
 
 
 @dataclass
@@ -217,7 +219,18 @@ _DRAFTS: dict[str, tuple[int, CalendarEventDraft]] = {}
 
 
 def get_calendar_adapter() -> CalendarAdapter:
+    """The signed-in user's Google Calendar if connected, else mock/preview."""
     global _ADAPTER
+    from app.database import get_current_owner_id
+    from app.integrations.google_calendar import (
+        GoogleCalendarLiveAdapter,
+        google_calendar_available,
+        is_connected,
+    )
+
+    owner = get_current_owner_id()
+    if google_calendar_available() and is_connected(owner):
+        return GoogleCalendarLiveAdapter(owner)
     if _ADAPTER is None:
         provider = os.getenv("LIFE_INBOX_CALENDAR_PROVIDER", "mock").strip() or "mock"
         if provider == "google":

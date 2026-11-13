@@ -90,6 +90,7 @@ class ExtractedTextUpdate(BaseModel):
 Priority = Literal["High", "Medium", "Low"]
 AnalysisMode = Literal[
     "openai",
+    "ai_provider",
     "fallback_no_api_call",
     "fallback_after_api_error",
     "empty_inbox",
@@ -218,6 +219,11 @@ class Task(BaseModel):
     domain: str = "Unsorted"
     domain_source: str = "auto"
     google_event_url: Optional[str] = None
+    repeat_rule: Optional[str] = None
+    repeat_label: Optional[str] = None
+    next_task_id: Optional[int] = None
+    # Only on a completion response: when the next copy of a repeating task is due.
+    next_due_on: Optional[str] = None
     completed_at: Optional[str] = None
     points_awarded: Optional[int] = None
     binned_at: Optional[str] = None
@@ -246,6 +252,8 @@ class TaskPatch(BaseModel):
     due_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     text: Optional[str] = Field(default=None, min_length=1, max_length=500)
     domain: Optional[str] = Field(default=None, max_length=40)
+    # daily | weekdays | weekly | days:mon,wed,fri ; null or "none" stops repeating
+    repeat_rule: Optional[str] = Field(default=None, max_length=60)
 
 
 class TeamCreate(BaseModel):
